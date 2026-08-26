@@ -1,9 +1,16 @@
 [project]
 name = "serve-scope"
 version = "0.0.1"
-description = "Interactive LLM inference lab. P0 only proves local GPU-backed serving."
+description = "Interactive LLM inference lab. P1 measures when offered load breaks p95 TTFT."
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "vllm==0.28.0",
+    "httpx",
+    "matplotlib",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
 ]
