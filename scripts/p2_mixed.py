@@ -240,6 +240,9 @@ async def offer_class(
     inflight: Inflight,
     prompt_fn,
     seed: int,
+    request_priority: int | None = None,
+    scheduler_policy: str = "fcfs",
+    send_priority_field: bool = False,
 ) -> dict:
     url = config["base_url"].rstrip("/") + config["chat_path"]
     workload_class = class_cfg["workload_class"]
@@ -257,6 +260,7 @@ async def offer_class(
             temperature=class_cfg["temperature"],
             min_tokens=class_cfg["min_tokens"],
             max_completion_tokens=class_cfg["max_completion_tokens"],
+            priority=request_priority if send_priority_field else None,
         )
         try:
             record = await stream_chat_request(
@@ -280,6 +284,8 @@ async def offer_class(
                 "scenario": scenario,
                 "offered_rps": class_cfg.get("offered_rps"),
                 "request_index": i,
+                "scheduler_policy": scheduler_policy,
+                "request_priority": 0 if request_priority is None else int(request_priority),
             }
         )
         records.append(record)
@@ -312,6 +318,9 @@ async def run_scenario(
     scenario: str,
     background_rps: float | None,
     clock,
+    scheduler_policy: str = "fcfs",
+    class_priorities: dict[str, int] | None = None,
+    send_priority_field: bool = False,
 ) -> tuple[list[dict], list[dict], list[dict], dict]:
     interactive_cfg = dict(config["interactive"])
     background_cfg = dict(config["background"])
@@ -366,6 +375,9 @@ async def run_scenario(
             inflight=interactive_inflight,
             prompt_fn=select_prompt,
             seed=interactive_seed,
+            request_priority=(class_priorities or {}).get(CLASS_INTERACTIVE, 0),
+            scheduler_policy=scheduler_policy,
+            send_priority_field=send_priority_field,
         )
     )
     if background_targets:
@@ -384,6 +396,9 @@ async def run_scenario(
                 inflight=background_inflight,
                 prompt_fn=select_background_prompt,
                 seed=background_seed,
+                request_priority=(class_priorities or {}).get(CLASS_BACKGROUND, 0),
+                scheduler_policy=scheduler_policy,
+                send_priority_field=send_priority_field,
             )
         )
         interactive_meta, background_meta = await asyncio.gather(interactive_offer, background_offer)
@@ -710,6 +725,9 @@ async def run_one_attempt(
     repeat_id: str,
     scenario: str,
     background_rps: float | None,
+    scheduler_policy: str = "fcfs",
+    class_priorities: dict[str, int] | None = None,
+    send_priority_field: bool = False,
 ) -> tuple[dict, list[dict], list[dict], list[dict]]:
     idle = await wait_until_idle(telemetry_client, config)
     if not idle:
@@ -725,6 +743,9 @@ async def run_one_attempt(
         scenario=scenario,
         background_rps=background_rps,
         clock=time.perf_counter,
+        scheduler_policy=scheduler_policy,
+        class_priorities=class_priorities,
+        send_priority_field=send_priority_field,
     )
     write_jsonl(out_dir / "requests.jsonl", records)
     for row in runtime_rows:
@@ -774,6 +795,9 @@ async def collect_valid_repeats(
     needed: int,
     max_attempts: int,
     label: str,
+    scheduler_policy: str = "fcfs",
+    class_priorities: dict[str, int] | None = None,
+    send_priority_field: bool = False,
 ) -> tuple[list[dict], list[dict], list[dict], list[dict]]:
     repeats = []
     phases = []
@@ -794,6 +818,9 @@ async def collect_valid_repeats(
             repeat_id=repeat_id,
             scenario=scenario,
             background_rps=background_rps,
+            scheduler_policy=scheduler_policy,
+            class_priorities=class_priorities,
+            send_priority_field=send_priority_field,
         )
         repeats.append(summary)
         phases.extend(phase_rows)
