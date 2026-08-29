@@ -569,9 +569,9 @@ def conclude(agg: dict) -> str:
         return "native priority result invalid/inconclusive"
     ratio = pri / fcfs if fcfs > 0 else None
     if pri < 1.0 and (ratio is not None and ratio <= 0.25):
-        return "native priority substantially solves P2"
+        return "native priority substantially mitigated the mixed-workload interference"
     if pri < 1.0:
-        return "native priority substantially solves P2"
+        return "native priority substantially mitigated the mixed-workload interference"
     if ratio is not None and ratio <= 0.50 and pri >= 1.0:
         return "native priority helps but leaves meaningful interference"
     if ratio is not None and ratio > 0.80:

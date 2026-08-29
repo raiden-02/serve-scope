@@ -39,7 +39,13 @@ def request_priority_for_class(workload_class: str, scheduler_policy: str) -> in
 
 
 def should_send_priority_field(scheduler_policy: str) -> bool:
-    """FCFS rejects nonzero priority. Do not send the field on the FCFS suite."""
+    """Send the request-body priority field only on the native-priority suite.
+
+    P3 FCFS intentionally omits the field so headline FCFS requests carry the
+    runtime default. Installed vLLM 0.28 accepted `priority=1` on FCFS in the
+    local smoke even though the protocol text says nonzero priority should be
+    rejected. No P3 FCFS headline request carried a priority field.
+    """
     return scheduler_policy == POLICY_PRIORITY
 
 
