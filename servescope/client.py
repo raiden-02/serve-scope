@@ -9,6 +9,7 @@ import httpx
 
 from servescope.metrics import (
     classify_status,
+    derive_request_timings,
     extract_backend_metrics,
     extract_finish_reason,
     extract_usage,
@@ -52,8 +53,8 @@ async def stream_chat_request(
     timeout_s: float,
     clock,
 ) -> dict[str, Any]:
-    attempt_s = clock()
-    dispatch_s = None
+    request_attempt_s = clock()
+    response_headers_s = None
     first_content_s = None
     complete_s = None
     http_status = None
@@ -71,7 +72,7 @@ async def stream_chat_request(
 
     try:
         async with client.stream("POST", url, json=payload, timeout=timeout_s) as response:
-            dispatch_s = clock()
+            response_headers_s = clock()
             http_status = response.status_code
             if http_status >= 400:
                 body = (await response.aread()).decode("utf-8", errors="replace")
@@ -146,27 +147,25 @@ async def stream_chat_request(
         error_message=error_message,
         client_capacity=client_capacity,
     )
-    sent_s = dispatch_s if dispatch_s is not None else attempt_s
-    client_ttft = (first_content_s - sent_s) if first_content_s is not None and dispatch_s is not None else None
-    client_e2e = (complete_s - sent_s) if complete_s is not None else None
+    timings = derive_request_timings(
+        scheduled_arrival_s=scheduled_s,
+        request_attempt_s=request_attempt_s,
+        response_headers_s=response_headers_s,
+        first_content_s=first_content_s,
+        completion_s=complete_s,
+    )
     return {
         "request_id": request_id,
         "backend_request_id": response_id,
         "prompt_id": prompt_id,
         "workload_class": workload_class,
-        "scheduled_arrival_s": scheduled_s,
-        "actual_dispatch_s": sent_s,
-        "dispatch_lag_s": sent_s - scheduled_s,
-        "first_content_s": first_content_s,
-        "completion_s": complete_s,
+        **timings,
         "http_status": http_status,
         "finish_reason": finish_reason,
         "status": status,
         "prompt_tokens": usage["prompt_tokens"],
         "completion_tokens": usage["completion_tokens"],
         "total_tokens": usage["total_tokens"],
-        "client_ttft_s": client_ttft,
-        "client_e2e_s": client_e2e,
         **backend,
         "error": error_message,
     }

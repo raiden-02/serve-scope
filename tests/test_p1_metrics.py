@@ -3,6 +3,7 @@ from __future__ import annotations
 from servescope.metrics import (
     aggregate_repeats,
     classify_status,
+    derive_request_timings,
     extract_backend_metrics,
     extract_finish_reason,
     extract_usage,
@@ -136,6 +137,7 @@ def test_repeat_summary_marks_client_limited_and_preserves_counts():
             "status": "length",
             "client_ttft_s": 0.2,
             "client_e2e_s": 0.8,
+            "request_attempt_s": 0.0,
             "actual_dispatch_s": 0.0,
             "dispatch_lag_s": 0.001,
             "completion_tokens": 64,
@@ -145,6 +147,7 @@ def test_repeat_summary_marks_client_limited_and_preserves_counts():
             "status": "length",
             "client_ttft_s": 0.3,
             "client_e2e_s": 0.9,
+            "request_attempt_s": 0.25,
             "actual_dispatch_s": 0.25,
             "dispatch_lag_s": 0.001,
             "completion_tokens": 64,
@@ -154,6 +157,7 @@ def test_repeat_summary_marks_client_limited_and_preserves_counts():
             "status": "timeout",
             "client_ttft_s": None,
             "client_e2e_s": 2.0,
+            "request_attempt_s": 0.50,
             "actual_dispatch_s": 0.50,
             "dispatch_lag_s": 0.001,
             "completion_tokens": None,
@@ -249,7 +253,52 @@ def test_client_limited_repeats_excluded_from_headline():
     assert first_slo_violation([agg], slo_s=1.0) is None
 
 
-def test_clean_crossing_requires_three_valid_repeats():
+def test_header_delay_is_not_dispatch_lag():
+    timings = derive_request_timings(
+        scheduled_arrival_s=10.000,
+        request_attempt_s=10.010,
+        response_headers_s=10.500,
+        first_content_s=11.000,
+        completion_s=12.000,
+    )
+    assert abs(timings["dispatch_lag_s"] - 0.010) < 1e-12
+    assert abs(timings["response_headers_latency_s"] - 0.490) < 1e-12
+    assert abs(timings["client_ttft_s"] - 0.990) < 1e-12
+    assert abs(timings["client_e2e_s"] - 1.990) < 1e-12
+
+
+def test_actual_dispatch_rps_uses_request_attempt_not_headers():
+    """Late response headers must not look like missed dispatch."""
+    records = []
+    for i in range(5):
+        scheduled = 10.0 + i * 0.25
+        attempt = scheduled + 0.002
+        headers = attempt + 0.490
+        timings = derive_request_timings(
+            scheduled_arrival_s=scheduled,
+            request_attempt_s=attempt,
+            response_headers_s=headers,
+            first_content_s=headers + 0.05,
+            completion_s=headers + 0.40,
+        )
+        records.append(
+            {
+                "status": "length",
+                "completion_tokens": 64,
+                "finish_reason": "length",
+                **timings,
+            }
+        )
+    summary = summarize_repeat(records, offered_rps=4.0, duration_s=1.0)
+    assert abs(summary["actual_dispatch_rps"] - 4.0) < 1e-9
+    assert summary["median_dispatch_lag_s"] < 0.010
+    assert summary["response_headers_latency_p95_s"] > 0.4
+    assert summary["client_limited"] is False
+    marked = mark_repeat_validity(summary, max_inflight=4096)
+    assert marked["valid_offered_load"] is True
+
+
+def test_clean_crossing_requires_three_valid_failures():
     failing = [
         _repeat(rps=132, p95=2.0, valid=True),
         _repeat(rps=132, p95=2.1, valid=True),
@@ -257,7 +306,21 @@ def test_clean_crossing_requires_three_valid_repeats():
     ]
     agg = aggregate_repeats(failing, min_valid_repeats=3, slo_s=1.0)
     assert agg["aggregate_valid"] is True
+    assert agg["slo_violated_all_valid_repeats"] is True
     assert first_clean_slo_violation([agg], slo_s=1.0) == 132.0
+
+
+def test_mixed_valid_fail_pass_is_instability_not_clean_crossing():
+    mixed = [
+        _repeat(rps=128, p95=2.0, valid=True),
+        _repeat(rps=128, p95=2.1, valid=True),
+        _repeat(rps=128, p95=0.08, valid=True),
+    ]
+    agg = aggregate_repeats(mixed, min_valid_repeats=3, slo_s=1.0)
+    assert agg["aggregate_valid"] is True
+    assert agg["slo_violated_all_valid_repeats"] is False
+    assert agg["valid_repeats_mixed_slo"] is True
+    assert first_clean_slo_violation([agg], slo_s=1.0) is None
 
 
 def test_invalid_aggregate_cannot_be_first_clean_crossing():
@@ -299,6 +362,7 @@ def test_first_slo_violation_does_not_invent_crossing():
         "valid_repeat_count": 3,
         "headline_p95_ttft_s_median": 1.4,
         "valid_repeat_p95s": [1.2, 1.4, 1.5],
+        "slo_violated_all_valid_repeats": True,
     }
     assert first_clean_slo_violation([ok, bad], slo_s=1.0) == 8.0
     assert first_slo_violation([ok], slo_s=1.0) is None

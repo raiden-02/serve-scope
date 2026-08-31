@@ -1,0 +1,11 @@
+SUPERSEDED for headline timing.
+
+This suite used response-header time as if it were client dispatch.
+Near overload that made server/header delay look like load-generator lag
+and shortened client TTFT.
+
+Keep the files as audit history. Do not use them for the P1 headline.
+
+Replacement suite after the request_attempt_s / response_headers_s clock split:
+
+  artifacts/p1/validation-2026-08-31T11-26-17Z/

@@ -1,0 +1,188 @@
+{
+  "suite_id": "validation-2026-08-31T11-26-17Z",
+  "mode": "validation",
+  "git": {
+    "commit": "9ae025a5f31e6b956804d5198f55022dcc65b3ad",
+    "dirty": true,
+    "branch": "p1-saturation-harness"
+  },
+  "model": "Qwen/Qwen3-1.7B",
+  "backend": "vllm",
+  "backend_version": "0.28.0",
+  "torch_version": "2.13.0+cu130",
+  "torch_cuda_build": "13.0",
+  "gpu": "NVIDIA GeForce RTX 4080 SUPER",
+  "server_command": "vllm serve Qwen/Qwen3-1.7B --gpu-memory-utilization 0.85 --enforce-eager --enable-per-request-metrics",
+  "server_env": {
+    "VLLM_WSL2_ENABLE_PIN_MEMORY": "1",
+    "VLLM_USE_FLASHINFER_SAMPLER": "0",
+    "HF_HOME": "/home/mayur/.cache/huggingface"
+  },
+  "notes": [
+    "WSLg/Xwayland shares the GPU with the vLLM process.",
+    "vLLM is running with --enforce-eager. That is a known WSL limitation, not a tuned serving mode.",
+    "P1 timings are measured on a controlled 64-token interactive workload. They are not general chat SLOs.",
+    "prefix caching stays at the vLLM default (enabled).",
+    "Wall-clock throughput divides completed work by the full repeat duration, including tail drain after the last scheduled arrival. It is not kernel/model-only decode throughput.",
+    "ulimit -n is 10240. max_inflight=4096 and client_max_connections=6144 so the HTTP pool is larger than the explicit in-flight cap and both stay under the FD limit."
+  ],
+  "slo_p95_ttft_seconds": 1.0,
+  "percentile_method": "numpy.percentile method='linear' (R type 7)",
+  "start_utc": "2026-08-31T11:26:17.267680+00:00",
+  "end_utc": "2026-08-31T11:48:43.728358+00:00",
+  "offered_rates_rps": [
+    120.0,
+    128.0,
+    132.0,
+    136.0
+  ],
+  "repeats": 3,
+  "duration_s": 45.0,
+  "pre_run_gpu": {
+    "name": "NVIDIA GeForce RTX 4080 SUPER",
+    "utilization_gpu_pct": 22.0,
+    "memory_used_mib": 15766.0,
+    "memory_total_mib": 16376.0
+  },
+  "first_clean_slo_violation_rps": null,
+  "first_observed_valid_collapse_rps": 128.0,
+  "instability_region_rps": [
+    128.0,
+    132.0
+  ],
+  "min_valid_repeats_for_clean_crossing": 3,
+  "ulimit_n_soft": 10240,
+  "ulimit_n_hard": 1048576,
+  "max_inflight": 4096,
+  "client_max_connections": 6144,
+  "aggregates": [
+    {
+      "offered_rps": 120.0,
+      "total_repeat_count": 3,
+      "valid_repeat_count": 3,
+      "invalid_repeat_count": 0,
+      "aggregate_valid": true,
+      "any_client_limited": false,
+      "all_repeat_p95s": [
+        0.059770046349933645,
+        0.07001986395009681,
+        0.0559117670998603
+      ],
+      "valid_repeat_p95s": [
+        0.059770046349933645,
+        0.07001986395009681,
+        0.0559117670998603
+      ],
+      "headline_p95_ttft_s_median": 0.059770046349933645,
+      "headline_p95_ttft_s_min": 0.0559117670998603,
+      "headline_p95_ttft_s_max": 0.07001986395009681,
+      "headline_p50_ttft_s_median": 0.047850932999836004,
+      "headline_output_token_tps_median": 7528.858608802103,
+      "headline_completed_rps_median": 117.63841576253286,
+      "slo_p95_ttft_seconds": 1.0,
+      "slo_met_all_valid_repeats": true,
+      "slo_violated_all_valid_repeats": false,
+      "valid_repeats_mixed_slo": false,
+      "any_valid_waiting_queue": false,
+      "repeats": 3
+    },
+    {
+      "offered_rps": 128.0,
+      "total_repeat_count": 3,
+      "valid_repeat_count": 3,
+      "invalid_repeat_count": 0,
+      "aggregate_valid": true,
+      "any_client_limited": false,
+      "all_repeat_p95s": [
+        25.829838938999956,
+        0.06995040205010811,
+        0.07020862284978195
+      ],
+      "valid_repeat_p95s": [
+        25.829838938999956,
+        0.06995040205010811,
+        0.07020862284978195
+      ],
+      "headline_p95_ttft_s_median": 0.07020862284978195,
+      "headline_p95_ttft_s_min": 0.06995040205010811,
+      "headline_p95_ttft_s_max": 25.829838938999956,
+      "headline_p50_ttft_s_median": 0.057103447999907075,
+      "headline_output_token_tps_median": 8029.074770909147,
+      "headline_completed_rps_median": 125.45429329545543,
+      "slo_p95_ttft_seconds": 1.0,
+      "slo_met_all_valid_repeats": false,
+      "slo_violated_all_valid_repeats": false,
+      "valid_repeats_mixed_slo": true,
+      "any_valid_waiting_queue": true,
+      "repeats": 3
+    },
+    {
+      "offered_rps": 132.0,
+      "total_repeat_count": 5,
+      "valid_repeat_count": 2,
+      "invalid_repeat_count": 3,
+      "aggregate_valid": false,
+      "any_client_limited": true,
+      "all_repeat_p95s": [
+        44.49881840949978,
+        21.193317954999884,
+        37.03514243849975,
+        34.33854279900015,
+        83.74775461019988
+      ],
+      "valid_repeat_p95s": [
+        21.193317954999884,
+        83.74775461019988
+      ],
+      "headline_p95_ttft_s_median": 52.47053628259988,
+      "headline_p95_ttft_s_min": 21.193317954999884,
+      "headline_p95_ttft_s_max": 83.74775461019988,
+      "headline_p50_ttft_s_median": 1.1546907962501791,
+      "headline_output_token_tps_median": 4235.77147577478,
+      "headline_completed_rps_median": 66.18392930898094,
+      "slo_p95_ttft_seconds": 1.0,
+      "slo_met_all_valid_repeats": false,
+      "slo_violated_all_valid_repeats": false,
+      "valid_repeats_mixed_slo": false,
+      "any_valid_waiting_queue": true,
+      "repeats": 5
+    },
+    {
+      "offered_rps": 136.0,
+      "total_repeat_count": 5,
+      "valid_repeat_count": 1,
+      "invalid_repeat_count": 4,
+      "aggregate_valid": false,
+      "any_client_limited": true,
+      "all_repeat_p95s": [
+        32.94571400140008,
+        44.509439509299675,
+        124.16836677494977,
+        39.61990342475008,
+        0.05378746645019419
+      ],
+      "valid_repeat_p95s": [
+        0.05378746645019419
+      ],
+      "headline_p95_ttft_s_median": 0.05378746645019419,
+      "headline_p95_ttft_s_min": 0.05378746645019419,
+      "headline_p95_ttft_s_max": 0.05378746645019419,
+      "headline_p50_ttft_s_median": 0.043228712499967514,
+      "headline_output_token_tps_median": 8550.397562562197,
+      "headline_completed_rps_median": 133.59996191503433,
+      "slo_p95_ttft_seconds": 1.0,
+      "slo_met_all_valid_repeats": true,
+      "slo_violated_all_valid_repeats": false,
+      "valid_repeats_mixed_slo": false,
+      "any_valid_waiting_queue": false,
+      "repeats": 5
+    }
+  ],
+  "package_versions": {
+    "vllm": "0.28.0",
+    "torch": "2.13.0+cu130",
+    "httpx": "0.28.1",
+    "numpy": "2.3.5",
+    "matplotlib": "3.11.1"
+  }
+}

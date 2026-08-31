@@ -6,7 +6,7 @@ It runs a real OpenAI-compatible vLLM server on this machine's RTX 4080 SUPER. P
 
 ## What the words mean
 
-- **TTFT (Time To First Token / first content):** time from sending the request until the first nonempty generated text arrives. In plain English: how long the user stares at a blank reply.
+- **TTFT (Time To First Token / first content):** time from the client actually starting the HTTP request (`request_attempt_s`) until the first nonempty generated text arrives. In plain English: how long the user stares at a blank reply. Time spent waiting for response headers is inside this number. It is not subtracted out.
 - **Offered load:** how many requests per second we *schedule* to the server, whether earlier requests have finished or not. This is not the same as concurrency.
 - **Throughput:** completed work per second. P1 reports **wall-clock** completed requests/sec and output tokens/sec: completed work divided by the full repeat duration, including the tail after the last scheduled arrival. That is not a kernel-only decode-rate measurement.
 - **Queue:** requests waiting because the server is already busy. vLLM exposes this as `vllm:num_requests_waiting`.
@@ -17,23 +17,31 @@ It runs a real OpenAI-compatible vLLM server on this machine's RTX 4080 SUPER. P
 
 On this machine, with this model and this synthetic 64-token interactive workload:
 
-**No single deterministic offered-load cliff was established.** The server is stable at 120 requests/sec. Around 128 to 136 RPS it enters an unstable saturation region: the same offered load can stay near 70 to 80 ms p95 TTFT, or grow a vLLM waiting queue and take many seconds to start a reply. When a run collapses, the load generator often cannot keep the intended arrival rate either.
+**There is no first clean tested SLO violation.** `first_clean_slo_violation_rps` is null.
 
-A clean crossing needs three valid repeats at that rate. Invalid means aborted, client-limited, or dispatch timing that missed the offered schedule. Those repeats stay in the raw files. They do not get to vote on a headline threshold.
+That needs three valid repeats at one offered rate, and every one of those valid repeats must miss p95 client TTFT < 1 s. A mix of fail and pass is instability, not a cliff.
 
-| Offered RPS | Valid repeats | Median valid p95 TTFT | What happened |
+Corrected evidence: `artifacts/p1/validation-2026-08-31T11-26-17Z/`.
+
+| Offered RPS | Valid / attempts | Valid p95 client TTFT | What happened |
 |---|---|---|---|
-| 8 and 64 | 3/3 in the original final suite | 47 to 51 ms | healthy baseline from `artifacts/p1/final-2026-08-31T01-43-39Z/` |
-| 120 | 3/3 | 70 ms (68 to 71 ms) | clean, no waiting queue |
-| 128 | 2/5 | 76 ms on the two valid repeats | two healthy repeats, three collapsed and invalid. Not a clean crossing |
-| 132 | 0/5 | n/a | every attempt was client-limited. Waiting queue and multi-second TTFT appeared, but the generator was no longer a clean offered-load source |
-| 136 | 0/5 | n/a | same as 132, including one abort at the 4096 in-flight cap |
+| 120 | 3/3 | 56 ms, 60 ms, 70 ms. All pass | clean. No waiting queue. Attempt dispatch held at ~120 RPS |
+| 128 | 3/3 | 26 s fail, then 70 ms pass, 70 ms pass | valid offered load, mixed SLO. Instability, not a clean crossing |
+| 132 | 2/5 | 21 s and 84 s on the two valid repeats | both valid repeats collapsed. Three other attempts had real request-attempt dispatch lag > 50 ms, so they are invalid. Not three valid repeats |
+| 136 | 1/5 | 54 ms on the one valid repeat | four attempts were client-limited (two hit the 4096 in-flight abort, two had request-attempt dispatch lag). The one valid repeat stayed healthy |
 
-`first_clean_slo_violation_rps` is **null**. 132 RPS is not the P1 answer.
+The previous "client-limited at 132-136" headline from `artifacts/p1/validation-2026-08-31T02-15-05Z/` is wrong. That suite stamped dispatch after HTTP response headers arrived, so server/header delay looked like load-generator lag. That directory stays on disk as audit history. It is superseded for timing headlines.
 
-Corrected evidence: `artifacts/p1/validation-2026-08-31T02-15-05Z/`.
+What the corrected clocks show:
 
-The earlier final suite is still on disk. Do not use it for the headline threshold. Smoke and pilot directories are range-finding only.
+- At 128 RPS the load generator can dispatch on schedule while vLLM grows a waiting queue. That collapse is a server/path result, not a fake client lag.
+- The same 128 RPS can also stay near 70 ms. fail + pass + pass is instability.
+- At 132 and 136 RPS some repeats still have a real client-side ceiling: the event loop misses the schedule, or in-flight hits 4096 and the run aborts. Late response headers alone do not make a run client-limited.
+- 136 RPS also produced one valid healthy repeat. That rate is not a proven server cliff.
+
+This is one synthetic 64-token workload on one model and one machine. It is not maximum GPU capacity.
+
+The original final suite (`artifacts/p1/final-2026-08-31T01-43-39Z/`) and the superseded validation stay on disk. Do not use them for the headline threshold. Smoke and pilot directories are range-finding only.
 
 ## What P1 is
 
@@ -105,13 +113,32 @@ artifacts/p1/<mode>-<UTC>/
 
 ## Measurement definitions
 
-- **Client TTFT:** first nonempty `delta.content` timestamp minus client dispatch. Role-only, empty, and reasoning-only chunks do not count.
-- **Client E2E:** stream completion minus client dispatch.
-- **Backend queue time / backend scheduled-to-first-token:** copied from vLLM `metrics` on the usage chunk when `--enable-per-request-metrics` is on. These are not client TTFT.
+Each request keeps five clocks:
+
+- `scheduled_arrival_s`: open-loop target `t0 + i / offered_rps`
+- `request_attempt_s`: immediately before `client.stream(...)`. This is the real dispatch / attempt time
+- `response_headers_s`: immediately after entering the streaming-response context. Headers are already available here. Diagnostic only. Do not call it dispatch
+- `first_content_s`: first nonempty generated `delta.content`
+- `completion_s`: actual terminal stream completion
+
+Derived:
+
+- `dispatch_lag_s = request_attempt_s - scheduled_arrival_s`
+- `response_headers_latency_s = response_headers_s - request_attempt_s` when headers exist
+- `client_ttft_s = first_content_s - request_attempt_s`
+- `client_e2e_s = completion_s - request_attempt_s`
+
+`actual_dispatch_rps` in `repeat_summary.csv` is computed from `request_attempt_s`, not from header timestamps.
+
+- **Client TTFT:** first nonempty `delta.content` minus `request_attempt_s`. Role-only, empty, and reasoning-only chunks do not count. Header wait is part of this number. Do not subtract `response_headers_latency_s` from user-facing latency.
+- **Response-headers latency:** diagnostic. It is part of client-observed TTFT. Late headers are server/network/setup time, not load-generator dispatch lag.
+- **Client E2E:** stream completion minus `request_attempt_s`.
+- **Backend queue time / backend scheduled-to-first-token:** copied from vLLM `metrics` on the usage chunk when `--enable-per-request-metrics` is on. Keep these separate from client TTFT and from header latency.
 - **Completed request:** status `success` or `length` with an explicit terminal finish reason (`length`, `stop`, or `eos_token`). HTTP 200 plus some content plus a dropped connection is a stream error, not success.
 - **Percentiles:** NumPy `percentile(..., method="linear")` (R type 7). Every aggregate keeps its sample count.
-- **Valid offered-load repeat:** not aborted, not client-limited, and dispatch timing held (actual dispatch rate at least 90% of offered, median dispatch lag at most 50 ms). A clean crossing needs three such repeats.
-- **Client-limited run:** actual dispatch rate < 90% of offered, or median dispatch lag > 50 ms, or the in-flight safety cap aborted the run, or httpx hit `PoolTimeout`. Those runs stay in diagnostics. They do not establish a clean threshold.
+- **Valid offered-load repeat:** not aborted, and request-attempt dispatch held (actual attempt rate at least 90% of offered, median attempt dispatch lag at most 50 ms), and no `PoolTimeout` / `client_capacity` event. Late response headers do not invalidate a repeat.
+- **Client-limited run:** attempt dispatch rate < 90% of offered, or median attempt dispatch lag > 50 ms, or the in-flight safety cap aborted the run, or httpx hit `PoolTimeout`. Those runs stay in diagnostics. They do not establish a clean threshold.
+- **Clean SLO violation:** at least three valid repeats, and every valid repeat has p95 client TTFT >= 1 s (`slo_violated_all_valid_repeats`). fail + fail + pass is `valid_repeats_mixed_slo`, not a crossing.
 - **Wall-clock throughput:** completed requests or output tokens divided by the full repeat wall-clock, including drain after the last scheduled arrival.
 
 ## Environment

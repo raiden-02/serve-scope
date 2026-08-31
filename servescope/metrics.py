@@ -149,6 +149,32 @@ def summarize_latencies(values: list[float]) -> dict[str, float | int | None]:
     }
 
 
+def derive_request_timings(
+    *,
+    scheduled_arrival_s: float,
+    request_attempt_s: float,
+    response_headers_s: float | None,
+    first_content_s: float | None,
+    completion_s: float | None,
+) -> dict[str, float | None]:
+    """Pure timing math. Header delay is diagnostic and stays inside client TTFT."""
+    headers_latency = None
+    if response_headers_s is not None:
+        headers_latency = response_headers_s - request_attempt_s
+    return {
+        "scheduled_arrival_s": scheduled_arrival_s,
+        "request_attempt_s": request_attempt_s,
+        "response_headers_s": response_headers_s,
+        "first_content_s": first_content_s,
+        "completion_s": completion_s,
+        "dispatch_lag_s": request_attempt_s - scheduled_arrival_s,
+        "response_headers_latency_s": headers_latency,
+        "client_ttft_s": (first_content_s - request_attempt_s) if first_content_s is not None else None,
+        "client_e2e_s": (completion_s - request_attempt_s) if completion_s is not None else None,
+        "actual_dispatch_s": request_attempt_s,
+    }
+
+
 def completed_records(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [row for row in records if row.get("status") in COMPLETED_STATUSES]
 
@@ -159,12 +185,21 @@ def summarize_repeat(records: list[dict[str, Any]], offered_rps: float, duration
     ttfts = [row["client_ttft_s"] for row in completed if row.get("client_ttft_s") is not None]
     e2es = [row["client_e2e_s"] for row in completed if row.get("client_e2e_s") is not None]
     dispatch_lags = [row["dispatch_lag_s"] for row in records if row.get("dispatch_lag_s") is not None]
+    header_latencies = [
+        row["response_headers_latency_s"]
+        for row in records
+        if row.get("response_headers_latency_s") is not None
+    ]
     output_tokens = sum(int(row["completion_tokens"]) for row in completed if row.get("completion_tokens") is not None)
-    dispatches = [row["actual_dispatch_s"] for row in records if row.get("actual_dispatch_s") is not None]
+    attempts = [
+        row["request_attempt_s"] if row.get("request_attempt_s") is not None else row.get("actual_dispatch_s")
+        for row in records
+    ]
+    attempts = [value for value in attempts if value is not None]
     actual_rps = None
-    if len(dispatches) >= 2:
-        span = max(dispatches) - min(dispatches)
-        actual_rps = (len(dispatches) - 1) / span if span > 0 else None
+    if len(attempts) >= 2:
+        span = max(attempts) - min(attempts)
+        actual_rps = (len(attempts) - 1) / span if span > 0 else None
     client_limited = False
     if actual_rps is not None and offered_rps > 0:
         client_limited = actual_rps < 0.90 * offered_rps
@@ -186,6 +221,7 @@ def summarize_repeat(records: list[dict[str, Any]], offered_rps: float, duration
     e2e_summary = summarize_latencies(e2es)
     queue_summary = summarize_latencies(queue_ms)
     backend_ttft_summary = summarize_latencies(backend_ttft_ms)
+    header_summary = summarize_latencies(header_latencies)
     return {
         "offered_rps": offered_rps,
         "actual_dispatch_rps": actual_rps,
@@ -211,6 +247,9 @@ def summarize_repeat(records: list[dict[str, Any]], offered_rps: float, duration
         "backend_ttft_p50_ms": backend_ttft_summary["p50"],
         "backend_ttft_p95_ms": backend_ttft_summary["p95"],
         "backend_ttft_n": backend_ttft_summary["n"],
+        "response_headers_latency_p50_s": header_summary["p50"],
+        "response_headers_latency_p95_s": header_summary["p95"],
+        "response_headers_latency_n": header_summary["n"],
         "median_dispatch_lag_s": percentile(dispatch_lags, 50) if dispatch_lags else None,
         "status_counts": _count_by(records, "status"),
         "finish_reason_counts": _count_by(records, "finish_reason"),
@@ -308,6 +347,9 @@ def aggregate_repeats(
         "headline_completed_rps_median": percentile(req_tps, 50),
         "slo_p95_ttft_seconds": slo_s,
         "slo_met_all_valid_repeats": bool(valid_p95s) and valid_fail == 0,
+        "slo_violated_all_valid_repeats": bool(valid_p95s)
+        and len(valid_p95s) >= min_valid_repeats
+        and valid_pass == 0,
         "valid_repeats_mixed_slo": valid_pass > 0 and valid_fail > 0,
         "any_valid_waiting_queue": any(value and value > 0 for value in valid_waiting),
         "repeats": len(repeat_summaries),
@@ -319,10 +361,10 @@ def first_clean_slo_violation(
     slo_s: float = 1.0,
     min_valid_repeats: int = MIN_VALID_REPEATS_FOR_CLEAN,
 ) -> float | None:
-    """First clean offered RPS whose valid-repeat median p95 TTFT is >= slo_s.
+    """First clean offered RPS where every valid repeat misses the SLO.
 
-    A rate cannot establish a crossing unless it has at least min_valid_repeats
-    valid repeats. Returns None when no clean monotonic crossing exists.
+    Needs at least min_valid_repeats valid repeats, all failing. Mixed
+    fail/pass is instability, not a deterministic crossing.
     """
     ordered = sorted(aggregates, key=lambda row: row["offered_rps"])
     for row in ordered:
@@ -330,8 +372,7 @@ def first_clean_slo_violation(
             continue
         if int(row.get("valid_repeat_count") or 0) < min_valid_repeats:
             continue
-        p95 = row.get("headline_p95_ttft_s_median")
-        if p95 is not None and p95 >= slo_s:
+        if row.get("slo_violated_all_valid_repeats"):
             return float(row["offered_rps"])
     return None
 
