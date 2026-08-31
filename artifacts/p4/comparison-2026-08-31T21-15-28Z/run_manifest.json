@@ -1,0 +1,170 @@
+{
+  "suite_id": "comparison-2026-08-31T21-15-28Z",
+  "git": {
+    "commit": "9cde7cb122214b83513cc33ef4c53b8ab58e3900",
+    "dirty": true,
+    "branch": "p4-adaptive-backpressure"
+  },
+  "source_hashes": {
+    "scripts/p3_native_priority.py": "9e02ff6bd5eaa1d965cc6aab9cec6676cb9e7064a213131e599918327f956fa5",
+    "scripts/p2_mixed.py": "304bffea81e9947ee5dfb0ee0201947538e97314f4581d6f71f67e8d0743a60b",
+    "servescope/p3_metrics.py": "564ed00ee25a23fc6a76d2f3e4563a764b1640972bf115a656cd0771451d48de",
+    "servescope/p2_metrics.py": "075031fca19a2062998d9da06e6ca60ee17a7f72ec48a5ca1f8cc634f32d665a",
+    "servescope/client.py": "1a6c17b1dc3cd0e72e395fc2eb8bb6dd71eef3fdba0b118466bfa0f45a2d5d21",
+    "servescope/metrics.py": "e73bad2a657a86aef383f917a24d60ffb24180c36e3ea02ddae5da43bb21dfcf",
+    "servescope/workload.py": "a56cb75c917f22484b77d68654607fbcab677a844737f28e82f1f1a077a3c65e",
+    "configs/p3_native_priority.json": "6d028aeaf8b4d719b87e1682249e6aa60561b707e2d6b4150b90bb2d4e963c71",
+    "servescope/backpressure.py": "2c42f21727e0a3e78f63b3d87cfa00a27cff9d84cf23c86dc1d8c77dcd77f39e",
+    "scripts/p4_backpressure.py": "759365c2ec6f441dc2a8fd652c2ed1de3e5f8a9c02a644052e56fbc16ad92d57",
+    "configs/p4_backpressure.json": "4e8388e7be824b72219c0b9556923f6280d4e429daa979093a69a43a22ed7099"
+  },
+  "model": "Qwen/Qwen3-1.7B",
+  "backend": "vllm",
+  "backend_version": "0.28.0",
+  "scheduler_policy": "priority",
+  "server_command": "vllm serve Qwen/Qwen3-1.7B --gpu-memory-utilization 0.85 --enforce-eager --enable-per-request-metrics --scheduling-policy priority",
+  "server_env": {
+    "VLLM_WSL2_ENABLE_PIN_MEMORY": "1",
+    "VLLM_USE_FLASHINFER_SAMPLER": "0",
+    "HF_HOME": "/home/mayur/.cache/huggingface"
+  },
+  "priority_mechanism": "OpenAI chat request-body field `priority`",
+  "class_priorities": {
+    "interactive": 0,
+    "background": 1
+  },
+  "controller": {
+    "initial_background_limit": 32,
+    "minimum_background_limit": 1,
+    "maximum_background_limit": 256,
+    "increase_after_zero_samples": 4,
+    "sample_interval_s": 0.5,
+    "pending_queue_capacity": 256
+  },
+  "class_configs": {
+    "interactive": {
+      "workload_class": "interactive",
+      "offered_rps": 64,
+      "min_tokens": 64,
+      "max_completion_tokens": 64,
+      "temperature": 0,
+      "max_inflight": 2048,
+      "client_max_connections": 2560,
+      "priority": 0
+    },
+    "background": {
+      "workload_class": "background",
+      "offered_rps": 16,
+      "min_tokens": 256,
+      "max_completion_tokens": 256,
+      "temperature": 0,
+      "max_inflight": 512,
+      "client_max_connections": 640,
+      "priority": 1
+    },
+    "telemetry": {
+      "client_max_connections": 8,
+      "max_inflight": 4
+    }
+  },
+  "ulimit_n_soft": 10240,
+  "ulimit_n_hard": 1048576,
+  "notes": [
+    "P4 keeps native --scheduling-policy priority.",
+    "ServeScope only admits background jobs. Interactive is never gated.",
+    "This is external backpressure, not a vLLM scheduler."
+  ],
+  "package_versions": {
+    "vllm": "0.28.0",
+    "torch": "2.13.0+cu130",
+    "httpx": "0.28.1",
+    "numpy": "2.3.5",
+    "matplotlib": "3.11.1"
+  },
+  "mode": "comparison",
+  "native_dir": "artifacts/p4/native-2026-08-31T21-07-52Z",
+  "backpressure_dir": "artifacts/p4/backpressure-2026-08-31T21-11-34Z",
+  "conclusion": "backpressure materially improves interactive latency and reduces runtime backlog with a measurable background cost",
+  "aggregates": {
+    "conclusion": "backpressure materially improves interactive latency and reduces runtime backlog with a measurable background cost",
+    "native_burst_p95": {
+      "n": 3,
+      "median": 0.29725837994992615,
+      "min": 0.29666517654914054,
+      "max": 0.31161761520143044
+    },
+    "gated_burst_p95": {
+      "n": 3,
+      "median": 0.10316116705016612,
+      "min": 0.10222767429768283,
+      "max": 0.10351846184912575
+    },
+    "native_waiting": {
+      "n": 3,
+      "median": 83.0,
+      "min": 82.0,
+      "max": 88.0
+    },
+    "gated_waiting": {
+      "n": 3,
+      "median": 0.0,
+      "min": 0.0,
+      "max": 0.0
+    },
+    "native_bg_e2e_p95": {
+      "n": 3,
+      "median": 19.10811044835136,
+      "min": 18.76089064000189,
+      "max": 19.208816604799722
+    },
+    "gated_bg_e2e_p95": {
+      "n": 3,
+      "median": 26.07516027750171,
+      "min": 24.2837016729005,
+      "max": 26.311637874547706
+    },
+    "native_bg_tok_tps": {
+      "n": 3,
+      "median": 1869.418493611238,
+      "min": 1861.4381829764836,
+      "max": 1878.6669504013284
+    },
+    "gated_bg_tok_tps": {
+      "n": 3,
+      "median": 1509.7585670695655,
+      "min": 1502.0650951636578,
+      "max": 1570.7542634418762
+    },
+    "native_last_bg": {
+      "n": 3,
+      "median": 47.86583513000005,
+      "min": 47.704040483000426,
+      "max": 48.00673670600008
+    },
+    "gated_last_bg": {
+      "n": 3,
+      "median": 55.69524845900014,
+      "min": 54.114966248998826,
+      "max": 55.90368666299764
+    },
+    "gated_max_pending": {
+      "n": 3,
+      "median": 137.0,
+      "min": 133,
+      "max": 137
+    },
+    "source_hashes": {
+      "scripts/p3_native_priority.py": "9e02ff6bd5eaa1d965cc6aab9cec6676cb9e7064a213131e599918327f956fa5",
+      "scripts/p2_mixed.py": "304bffea81e9947ee5dfb0ee0201947538e97314f4581d6f71f67e8d0743a60b",
+      "servescope/p3_metrics.py": "564ed00ee25a23fc6a76d2f3e4563a764b1640972bf115a656cd0771451d48de",
+      "servescope/p2_metrics.py": "075031fca19a2062998d9da06e6ca60ee17a7f72ec48a5ca1f8cc634f32d665a",
+      "servescope/client.py": "1a6c17b1dc3cd0e72e395fc2eb8bb6dd71eef3fdba0b118466bfa0f45a2d5d21",
+      "servescope/metrics.py": "e73bad2a657a86aef383f917a24d60ffb24180c36e3ea02ddae5da43bb21dfcf",
+      "servescope/workload.py": "a56cb75c917f22484b77d68654607fbcab677a844737f28e82f1f1a077a3c65e",
+      "configs/p3_native_priority.json": "6d028aeaf8b4d719b87e1682249e6aa60561b707e2d6b4150b90bb2d4e963c71",
+      "servescope/backpressure.py": "2c42f21727e0a3e78f63b3d87cfa00a27cff9d84cf23c86dc1d8c77dcd77f39e",
+      "scripts/p4_backpressure.py": "759365c2ec6f441dc2a8fd652c2ed1de3e5f8a9c02a644052e56fbc16ad92d57",
+      "configs/p4_backpressure.json": "4e8388e7be824b72219c0b9556923f6280d4e429daa979093a69a43a22ed7099"
+    }
+  }
+}

@@ -41,7 +41,7 @@ This is not a priority scheduler, admission controller, or ServeScope interventi
 
 P2 showed the problem on default vLLM scheduling. P3 asks how much of that mixed-workload damage vLLM's own native priority scheduler can fix before ServeScope adds any policy of its own.
 
-**Native priority substantially reduced the interactive collapse. It did not restore the healthy tens-of-milliseconds burst TTFT, and background work paid for it.**
+**Native priority substantially mitigated the mixed-workload interference.** It met the 1 s SLO. It did not restore the healthy tens-of-milliseconds burst TTFT, and background work paid for it.
 
 This session's contemporaneous FCFS mixed burst median was 3.33 s, a bit slower than the historical P2 median of 2.41 s. P3 therefore compares the two policies measured together, not against old P2 numbers.
 
@@ -65,6 +65,31 @@ Waiting queue: FCFS 235-242, priority 144-146. All 240 background requests compl
 Background cost: output-token goodput fell from about 2240 tok/s to 1583 tok/s. Request goodput fell from about 8.75 to 6.18 rps. Last background completion moved from about 42.4 s to 53.8 s. Background p95 E2E moved from about 12.8 s to 26.3 s.
 
 This is native vLLM priority scheduling, not isolation. The 1 s interactive SLO is met during the mix, but burst p95 is still about 18 times the 47 ms healthy control, and a waiting queue remains. P4 must not claim a ServeScope scheduler for this result.
+
+## P4 result
+
+P4 asks whether ServeScope can keep excess background work out of vLLM by admitting it only when the server is not already queued. The server stays on native priority. Interactive requests are never gated.
+
+**External AIMD backpressure moved the backlog off vLLM and cut this session's mixed burst p95 from about 297 ms to 103 ms. Background jobs waited in a ServeScope queue instead, then still finished.**
+
+This session's fresh native-priority baseline was healthier than the accepted P3 suite (297 ms / wait 83 vs P3 836 ms / wait 144). P4 compares the two modes measured together. P3 remains the FCFS vs native-priority evidence.
+
+Evidence: native `artifacts/p4/native-2026-08-31T21-07-52Z/`, backpressure `artifacts/p4/backpressure-2026-08-31T21-11-34Z/`, comparison `artifacts/p4/comparison-2026-08-31T21-15-28Z/`. Pilot: `artifacts/p4/pilot-2026-08-31T21-05-55Z/`.
+
+| Window | Native priority mixed p95 TTFT | Priority + ServeScope backpressure p95 TTFT |
+|---|---|---|
+| pre (0-15 s) | 47 ms. SLO met | 50-54 ms. SLO met |
+| burst (15-30 s) | 297-312 ms. SLO met | 102-104 ms. SLO met |
+| 30-60 s backlog window | 159-255 ms. SLO met | 104-113 ms. SLO met |
+| after last background completion | 47-50 ms. SLO met | 50-52 ms. SLO met |
+
+Median burst p95: 297 ms to 103 ms. Max vLLM waiting: 83 to 0. Max ServeScope pending background jobs: 137. The work did not disappear.
+
+Background cost, measured from original offered arrival to completion: p95 E2E 19.1 s to 26.1 s. Output-token goodput 1869 tok/s to 1510 tok/s. Last completion 47.9 s to 55.7 s. Admission-delay p95 was about 18 s. All 240 jobs entered ServeScope on schedule and all 240 completed.
+
+The controller used only `vllm:num_requests_waiting`, sampled every 500 ms. Limit started at 32, never dropped (waiting stayed 0), and rose to 62. That is additive increase while the server stayed empty, not a claim of an optimal window.
+
+This is external background admission. vLLM still owns priority scheduling, batching, KV cache, and kernels.
 
 ## P1 result
 
@@ -134,6 +159,16 @@ It reuses the exact P2 mixed scenario. Interactive and background stay independe
 
 P3 does not implement a ServeScope scheduler, admission control, background throttle, concurrency intervention, or a frontend.
 
+## What P4 is
+
+P4 answers one question:
+
+> Can ServeScope prevent avoidable server backlog by controlling how much background work is admitted to vLLM, while retaining native priority as the runtime baseline?
+
+All 240 background jobs still arrive at ServeScope on the original 16/s, t=15-30 s schedule. The controller may defer them in a local pending queue. It does not drop, cancel, shorten, or rewrite arrivals. Interactive traffic goes straight to vLLM.
+
+P4 does not replace vLLM scheduling and does not add a frontend.
+
 ## Reproduce P1
 
 Work inside WSL2 Ubuntu. Keep the Hugging Face cache on the Linux filesystem, not `/mnt/c`.
@@ -172,15 +207,19 @@ python scripts/p1_sweep.py --mode validation --rates 120,128,132,136
 python -m pytest tests/test_p1_metrics.py tests/test_p2_metrics.py
 python scripts/p2_mixed.py --mode pilot
 python scripts/p2_mixed.py --mode final --pilot-dir artifacts/p2/pilot-<UTC>/
-python -m pytest tests/test_p1_metrics.py tests/test_p2_metrics.py tests/test_p3_metrics.py
+python -m pytest tests/test_p1_metrics.py tests/test_p2_metrics.py tests/test_p3_metrics.py tests/test_p4_backpressure.py
 python scripts/p3_native_priority.py --mode smoke
 python scripts/p3_native_priority.py --mode fcfs
 # stop the FCFS server, then start the same command plus --scheduling-policy priority
 python scripts/p3_native_priority.py --mode priority
 python scripts/p3_native_priority.py --mode compare --fcfs-dir artifacts/p3/fcfs-<UTC>/ --priority-dir artifacts/p3/priority-<UTC>/
+python scripts/p4_backpressure.py --mode pilot
+python scripts/p4_backpressure.py --mode native
+python scripts/p4_backpressure.py --mode backpressure
+python scripts/p4_backpressure.py --mode compare --native-dir artifacts/p4/native-<UTC>/ --backpressure-dir artifacts/p4/backpressure-<UTC>/
 ```
 
-P1 config: `configs/p1_short_chat.json`. P2 config: `configs/p2_mixed.json`. P3 config: `configs/p3_native_priority.json`.
+P1 config: `configs/p1_short_chat.json`. P2 config: `configs/p2_mixed.json`. P3 config: `configs/p3_native_priority.json`. P4 config: `configs/p4_backpressure.json`.
 
 Priority server (only difference from the FCFS command above):
 
@@ -210,6 +249,8 @@ artifacts/p1/<mode>-<UTC>/
 P2 suites write `artifacts/p2/<mode>-<UTC>/` with the same raw request file plus `phase_summary.csv`, `interactive_ttft_timeline.png`, `queue_timeline.png`, and `control_vs_mixed.png`.
 
 P3 writes `artifacts/p3/fcfs-<UTC>/`, `artifacts/p3/priority-<UTC>/`, and `artifacts/p3/comparison-<UTC>/`. Comparison plots are `fcfs_vs_priority_ttft.png`, `fcfs_vs_priority_queue.png`, and `tradeoff.png`. Every P3 request row includes `scheduler_policy` and `request_priority`. The run manifest also stores SHA-256 `source_hashes` for the benchmark files.
+
+P4 writes `artifacts/p4/native-<UTC>/`, `artifacts/p4/backpressure-<UTC>/`, and `artifacts/p4/comparison-<UTC>/`. Comparison plots are `interactive_protection.png`, `queue_movement.png`, and `controller_window.png`. Intervention suites also write `controller_metrics.csv`. Background rows add `offered_arrival_s`, `ingress_enqueue_s`, `admission_delay_s`, and `background_total_e2e_s`.
 
 `requests.jsonl` is the source of truth for request metrics.
 
@@ -244,6 +285,9 @@ Derived:
 - **Wall-clock throughput:** completed requests or output tokens divided by the full repeat wall-clock, including drain after the last scheduled arrival.
 - **P2 phase:** `pre_burst` is [0, 15) s, `burst_injection` is [15, 30) s, `recovery` is [30, 60) s, from the request's attempt time relative to scenario start. Completion time does not move a request into a later phase.
 - **Interference ratio:** mixed burst-phase interactive p95 TTFT divided by the control repeat's aligned 15-30 s p95. Descriptive only.
+- **P4 ingress lag:** `ingress_enqueue_s - offered_arrival_s`. This is the generator schedule into the ServeScope pending queue. It is not admission delay.
+- **P4 admission delay:** `request_attempt_s - ingress_enqueue_s`. Intentional ServeScope defer. It does not fail a repeat.
+- **P4 background total E2E:** `completion_s - offered_arrival_s`. Includes local defer. Headline background latency uses this, not server-attempt E2E.
 
 ## Environment
 
@@ -282,4 +326,4 @@ This machine needed a host C compiler for Triton. gcc 13.3 was extracted into `/
 
 ## What is not here
 
-P3 measured default FCFS and native `--scheduling-policy priority` on the same P2 mixed workload. It does not implement a ServeScope scheduler, admission control, a background concurrency controller, a frontend, or a second inference backend. Those remain later checkpoints only if the remaining gap justifies them.
+P4 adds external AIMD background backpressure on top of native vLLM priority. It does not patch vLLM, replace the runtime scheduler, drop or cancel jobs, or implement a frontend. A live lab UI is still later work.
