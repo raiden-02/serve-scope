@@ -8,7 +8,7 @@ It runs a real OpenAI-compatible vLLM server on this machine's RTX 4080 SUPER. P
 
 - **TTFT (Time To First Token / first content):** time from sending the request until the first nonempty generated text arrives. In plain English: how long the user stares at a blank reply.
 - **Offered load:** how many requests per second we *schedule* to the server, whether earlier requests have finished or not. This is not the same as concurrency.
-- **Throughput:** completed work per second. P1 reports completed requests/sec and output tokens/sec.
+- **Throughput:** completed work per second. P1 reports **wall-clock** completed requests/sec and output tokens/sec: completed work divided by the full repeat duration, including the tail after the last scheduled arrival. That is not a kernel-only decode-rate measurement.
 - **Queue:** requests waiting because the server is already busy. vLLM exposes this as `vllm:num_requests_waiting`.
 - **p95:** 95% of measured values are at or below this number. The slowest 5% are worse.
 - **SLO:** a chosen target, not a universal industry standard. P1 uses **p95 client TTFT < 1.0 second**.
@@ -17,26 +17,23 @@ It runs a real OpenAI-compatible vLLM server on this machine's RTX 4080 SUPER. P
 
 On this machine, with this model and this synthetic 64-token interactive workload:
 
-**The first tested offered load that fails the chosen p95 TTFT < 1 s target is 132 requests/sec.**
+**No single deterministic offered-load cliff was established.** The server is stable at 120 requests/sec. Around 128 to 136 RPS it enters an unstable saturation region: the same offered load can stay near 70 to 80 ms p95 TTFT, or grow a vLLM waiting queue and take many seconds to start a reply. When a run collapses, the load generator often cannot keep the intended arrival rate either.
 
-Headline p95 is the **median of three independent repeat p95s**. That is what "first tested rate" refers to.
+A clean crossing needs three valid repeats at that rate. Invalid means aborted, client-limited, or dispatch timing that missed the offered schedule. Those repeats stay in the raw files. They do not get to vote on a headline threshold.
 
-| Offered RPS | Median repeat p95 TTFT | Repeat p95 range | Waiting queue appeared | Notes |
-|---|---|---|---|---|
-| 8 | 47 ms | 47 to 48 ms | no | low-load baseline |
-| 64 | 51 ms | 51 to 56 ms | no | still comfortable |
-| 128 | 93 ms | 80 ms to 12.3 s | yes, on the collapsed repeat | approaching the knee. One of three repeats collapsed |
-| 132 | 19.7 s | 14.7 to 21.8 s | yes | first rate where every repeat misses the SLO |
-| 136 | 80 ms | 79 ms to 19.3 s | yes, on the collapsed repeat | median still passes. One repeat collapsed |
-| 144 | 26.8 s | 22.9 to 75.2 s | yes | overloaded. All three repeats were client-limited or aborted |
+| Offered RPS | Valid repeats | Median valid p95 TTFT | What happened |
+|---|---|---|---|
+| 8 and 64 | 3/3 in the original final suite | 47 to 51 ms | healthy baseline from `artifacts/p1/final-2026-08-31T01-43-39Z/` |
+| 120 | 3/3 | 70 ms (68 to 71 ms) | clean, no waiting queue |
+| 128 | 2/5 | 76 ms on the two valid repeats | two healthy repeats, three collapsed and invalid. Not a clean crossing |
+| 132 | 0/5 | n/a | every attempt was client-limited. Waiting queue and multi-second TTFT appeared, but the generator was no longer a clean offered-load source |
+| 136 | 0/5 | n/a | same as 132, including one abort at the 4096 in-flight cap |
 
-The useful story is not a single clean cliff at one integer. From 8 through 64 RPS the server stays near 50 ms p95 TTFT and throughput scales up. Near 128 to 136 RPS the same offered load can either stay responsive or fall into a multi-second waiting queue. 132 RPS is the first tested point where that collapse happened on every repeat. 144 RPS is worse, and the client could not always sustain the intended arrival rate.
+`first_clean_slo_violation_rps` is **null**. 132 RPS is not the P1 answer.
 
-Peak healthy output-token throughput in the final suite was about 8000 to 8500 tokens/sec (128 to 136 RPS on the healthy repeats). When a run queued, completed-request throughput dropped into the 80 to 100 req/s range.
+Corrected evidence: `artifacts/p1/validation-2026-08-31T02-15-05Z/`.
 
-Raw evidence: `artifacts/p1/final-2026-08-31T01-43-39Z/`.
-
-Pilot and smoke directories under `artifacts/p1/` are disposable range-finding. Do not mix them into the headline table.
+The earlier final suite is still on disk. Do not use it for the headline threshold. Smoke and pilot directories are range-finding only.
 
 ## What P1 is
 
@@ -84,6 +81,7 @@ python -m pytest tests/test_p1_metrics.py
 python scripts/p1_sweep.py --mode smoke
 python scripts/p1_sweep.py --mode pilot
 python scripts/p1_sweep.py --mode final --rates 8,64,128,132,136,144
+python scripts/p1_sweep.py --mode validation --rates 120,128,132,136
 ```
 
 Config: `configs/p1_short_chat.json`.
@@ -110,9 +108,11 @@ artifacts/p1/<mode>-<UTC>/
 - **Client TTFT:** first nonempty `delta.content` timestamp minus client dispatch. Role-only, empty, and reasoning-only chunks do not count.
 - **Client E2E:** stream completion minus client dispatch.
 - **Backend queue time / backend scheduled-to-first-token:** copied from vLLM `metrics` on the usage chunk when `--enable-per-request-metrics` is on. These are not client TTFT.
-- **Completed request:** status `success` or `length`. A 64-token run ending with `finish_reason=length` is expected. It is not recorded as a generic `success`.
+- **Completed request:** status `success` or `length` with an explicit terminal finish reason (`length`, `stop`, or `eos_token`). HTTP 200 plus some content plus a dropped connection is a stream error, not success.
 - **Percentiles:** NumPy `percentile(..., method="linear")` (R type 7). Every aggregate keeps its sample count.
-- **Client-limited run:** actual dispatch rate < 90% of offered, or median dispatch lag > 50 ms, or the in-flight safety cap aborted the run. Those runs are marked invalid as GPU-saturation evidence.
+- **Valid offered-load repeat:** not aborted, not client-limited, and dispatch timing held (actual dispatch rate at least 90% of offered, median dispatch lag at most 50 ms). A clean crossing needs three such repeats.
+- **Client-limited run:** actual dispatch rate < 90% of offered, or median dispatch lag > 50 ms, or the in-flight safety cap aborted the run, or httpx hit `PoolTimeout`. Those runs stay in diagnostics. They do not establish a clean threshold.
+- **Wall-clock throughput:** completed requests or output tokens divided by the full repeat wall-clock, including drain after the last scheduled arrival.
 
 ## Environment
 

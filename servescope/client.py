@@ -52,7 +52,8 @@ async def stream_chat_request(
     timeout_s: float,
     clock,
 ) -> dict[str, Any]:
-    dispatch_s = clock()
+    attempt_s = clock()
+    dispatch_s = None
     first_content_s = None
     complete_s = None
     http_status = None
@@ -64,11 +65,13 @@ async def stream_chat_request(
     timed_out = False
     cancelled = False
     stream_error = False
+    client_capacity = False
     error_message = None
     response_id = None
 
     try:
         async with client.stream("POST", url, json=payload, timeout=timeout_s) as response:
+            dispatch_s = clock()
             http_status = response.status_code
             if http_status >= 400:
                 body = (await response.aread()).decode("utf-8", errors="replace")
@@ -108,8 +111,13 @@ async def stream_chat_request(
                             got_content = True
                 if complete_s is None:
                     complete_s = clock()
-                    if http_status == 200 and not stream_error:
-                        stream_done = True
+                    if http_status == 200 and not stream_done and not stream_error:
+                        stream_error = True
+                        error_message = error_message or "premature EOF: stream ended without a terminal finish reason"
+    except httpx.PoolTimeout as exc:
+        client_capacity = True
+        error_message = f"PoolTimeout: {exc}"
+        complete_s = clock()
     except httpx.TimeoutException as exc:
         timed_out = True
         error_message = f"TimeoutException: {exc}"
@@ -136,17 +144,19 @@ async def stream_chat_request(
         cancelled=cancelled,
         stream_error=stream_error,
         error_message=error_message,
+        client_capacity=client_capacity,
     )
-    client_ttft = (first_content_s - dispatch_s) if first_content_s is not None else None
-    client_e2e = (complete_s - dispatch_s) if complete_s is not None else None
+    sent_s = dispatch_s if dispatch_s is not None else attempt_s
+    client_ttft = (first_content_s - sent_s) if first_content_s is not None and dispatch_s is not None else None
+    client_e2e = (complete_s - sent_s) if complete_s is not None else None
     return {
         "request_id": request_id,
         "backend_request_id": response_id,
         "prompt_id": prompt_id,
         "workload_class": workload_class,
         "scheduled_arrival_s": scheduled_s,
-        "actual_dispatch_s": dispatch_s,
-        "dispatch_lag_s": dispatch_s - scheduled_s,
+        "actual_dispatch_s": sent_s,
+        "dispatch_lag_s": sent_s - scheduled_s,
         "first_content_s": first_content_s,
         "completion_s": complete_s,
         "http_status": http_status,

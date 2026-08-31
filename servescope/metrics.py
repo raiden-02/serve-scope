@@ -13,6 +13,8 @@ from typing import Any
 import numpy as np
 
 COMPLETED_STATUSES = frozenset({"success", "length"})
+TERMINAL_FINISH_REASONS = frozenset({"length", "stop", "eos_token"})
+MIN_VALID_REPEATS_FOR_CLEAN = 3
 
 # Prometheus names confirmed on the local vLLM 0.28.0 /metrics endpoint.
 METRIC_RUNNING = "vllm:num_requests_running"
@@ -89,9 +91,12 @@ def classify_status(
     cancelled: bool,
     stream_error: bool,
     error_message: str | None,
+    client_capacity: bool = False,
 ) -> str:
     if cancelled:
         return "cancelled"
+    if client_capacity:
+        return "client_capacity"
     if timed_out:
         return "timeout"
     if stream_error:
@@ -100,12 +105,10 @@ def classify_status(
         return "http_error"
     if http_status == 200 and finish_reason == "length" and got_content and stream_done:
         return "length"
-    if http_status == 200 and got_content and stream_done and finish_reason in (
-        "stop",
-        "eos_token",
-        None,
-    ):
+    if http_status == 200 and finish_reason in {"stop", "eos_token"} and got_content and stream_done:
         return "success"
+    if http_status == 200 and finish_reason not in TERMINAL_FINISH_REASONS:
+        return "stream_error"
     if error_message:
         return "other_error"
     return "other_error"
@@ -200,8 +203,8 @@ def summarize_repeat(records: list[dict[str, Any]], offered_rps: float, duration
         "client_e2e_p95_s": e2e_summary["p95"],
         "client_e2e_p99_s": e2e_summary["p99"],
         "client_e2e_n": e2e_summary["n"],
-        "completed_request_throughput_rps": (len(completed) / duration_s) if duration_s > 0 else None,
-        "output_token_throughput_tps": (output_tokens / duration_s) if duration_s > 0 else None,
+        "wall_clock_completed_request_throughput_rps": (len(completed) / duration_s) if duration_s > 0 else None,
+        "wall_clock_output_token_throughput_tps": (output_tokens / duration_s) if duration_s > 0 else None,
         "backend_queue_time_p50_ms": queue_summary["p50"],
         "backend_queue_time_p95_ms": queue_summary["p95"],
         "backend_queue_time_n": queue_summary["n"],
@@ -214,49 +217,163 @@ def summarize_repeat(records: list[dict[str, Any]], offered_rps: float, duration
     }
 
 
-def aggregate_repeats(repeat_summaries: list[dict[str, Any]]) -> dict[str, Any]:
+def mark_repeat_validity(
+    summary: dict[str, Any],
+    *,
+    max_inflight: int | None = None,
+) -> dict[str, Any]:
+    """Mark whether a repeat is valid clean offered-load evidence.
+
+    Invalid repeats stay in raw data and the repeat summary. They are excluded
+    from headline latency/throughput that claims to describe a clean offered load.
+    """
+    reasons: list[str] = []
+    if summary.get("aborted"):
+        summary["client_limited"] = True
+        reasons.append(summary.get("abort_reason") or "aborted")
+    offered = summary.get("offered_rps") or 0.0
+    actual = summary.get("actual_dispatch_rps")
+    if actual is not None and offered > 0 and actual < 0.90 * offered:
+        summary["client_limited"] = True
+        reasons.append("actual_dispatch_rps_below_90pct")
+    median_lag = summary.get("median_dispatch_lag_s")
+    if median_lag is not None and median_lag > 0.050:
+        summary["client_limited"] = True
+        reasons.append("median_dispatch_lag_gt_50ms")
+    status_counts = summary.get("status_counts") or {}
+    if status_counts.get("client_capacity"):
+        summary["client_limited"] = True
+        reasons.append("httpx_pool_timeout")
+    if summary.get("client_limited") and not reasons:
+        reasons.append("client_limited")
+    unique_reasons: list[str] = []
+    for reason in reasons:
+        if reason not in unique_reasons:
+            unique_reasons.append(reason)
+    summary["valid_offered_load"] = not bool(summary.get("client_limited")) and not bool(summary.get("aborted"))
+    summary["invalid_reason"] = None if summary["valid_offered_load"] else ", ".join(unique_reasons)
+    peak = summary.get("peak_inflight")
+    if peak is not None and max_inflight:
+        summary["peak_inflight_fraction_of_limit"] = float(peak) / float(max_inflight)
+    else:
+        summary.setdefault("peak_inflight_fraction_of_limit", None)
+    return summary
+
+
+def aggregate_repeats(
+    repeat_summaries: list[dict[str, Any]],
+    *,
+    min_valid_repeats: int = MIN_VALID_REPEATS_FOR_CLEAN,
+    slo_s: float = 1.0,
+) -> dict[str, Any]:
     if not repeat_summaries:
         return {}
     offered = repeat_summaries[0]["offered_rps"]
-    p95s = [row["client_ttft_p95_s"] for row in repeat_summaries if row.get("client_ttft_p95_s") is not None]
-    p50s = [row["client_ttft_p50_s"] for row in repeat_summaries if row.get("client_ttft_p50_s") is not None]
+    all_p95s = [row["client_ttft_p95_s"] for row in repeat_summaries if row.get("client_ttft_p95_s") is not None]
+    valid = [row for row in repeat_summaries if row.get("valid_offered_load")]
+    invalid = [row for row in repeat_summaries if not row.get("valid_offered_load")]
+    valid_p95s = [row["client_ttft_p95_s"] for row in valid if row.get("client_ttft_p95_s") is not None]
+    valid_p50s = [row["client_ttft_p50_s"] for row in valid if row.get("client_ttft_p50_s") is not None]
     throughputs = [
-        row["output_token_throughput_tps"]
-        for row in repeat_summaries
-        if row.get("output_token_throughput_tps") is not None
+        row["wall_clock_output_token_throughput_tps"]
+        for row in valid
+        if row.get("wall_clock_output_token_throughput_tps") is not None
     ]
     req_tps = [
-        row["completed_request_throughput_rps"]
-        for row in repeat_summaries
-        if row.get("completed_request_throughput_rps") is not None
+        row["wall_clock_completed_request_throughput_rps"]
+        for row in valid
+        if row.get("wall_clock_completed_request_throughput_rps") is not None
+    ]
+    valid_fail = sum(1 for value in valid_p95s if value >= slo_s)
+    valid_pass = sum(1 for value in valid_p95s if value < slo_s)
+    valid_waiting = [
+        row.get("max_waiting_requests")
+        for row in valid
+        if row.get("max_waiting_requests") is not None
     ]
     return {
         "offered_rps": offered,
-        "repeats": len(repeat_summaries),
+        "total_repeat_count": len(repeat_summaries),
+        "valid_repeat_count": len(valid),
+        "invalid_repeat_count": len(invalid),
+        "aggregate_valid": len(valid) >= min_valid_repeats,
         "any_client_limited": any(row.get("client_limited") for row in repeat_summaries),
-        "headline_p95_ttft_s_median": percentile(p95s, 50),
-        "headline_p95_ttft_s_min": min(p95s) if p95s else None,
-        "headline_p95_ttft_s_max": max(p95s) if p95s else None,
-        "headline_p50_ttft_s_median": percentile(p50s, 50),
+        "all_repeat_p95s": all_p95s,
+        "valid_repeat_p95s": valid_p95s,
+        "headline_p95_ttft_s_median": percentile(valid_p95s, 50),
+        "headline_p95_ttft_s_min": min(valid_p95s) if valid_p95s else None,
+        "headline_p95_ttft_s_max": max(valid_p95s) if valid_p95s else None,
+        "headline_p50_ttft_s_median": percentile(valid_p50s, 50),
         "headline_output_token_tps_median": percentile(throughputs, 50),
         "headline_completed_rps_median": percentile(req_tps, 50),
-        "repeat_p95_ttft_s": p95s,
-        "slo_p95_ttft_seconds": 1.0,
-        "slo_met_all_repeats": all(
-            row.get("client_ttft_p95_s") is not None and row["client_ttft_p95_s"] < 1.0
-            for row in repeat_summaries
-        ),
+        "slo_p95_ttft_seconds": slo_s,
+        "slo_met_all_valid_repeats": bool(valid_p95s) and valid_fail == 0,
+        "valid_repeats_mixed_slo": valid_pass > 0 and valid_fail > 0,
+        "any_valid_waiting_queue": any(value and value > 0 for value in valid_waiting),
+        "repeats": len(repeat_summaries),
     }
 
 
-def first_slo_violation(aggregates: list[dict[str, Any]], slo_s: float = 1.0) -> float | None:
-    """First offered RPS whose median-repeat p95 TTFT is >= slo_s. None if none cross."""
+def first_clean_slo_violation(
+    aggregates: list[dict[str, Any]],
+    slo_s: float = 1.0,
+    min_valid_repeats: int = MIN_VALID_REPEATS_FOR_CLEAN,
+) -> float | None:
+    """First clean offered RPS whose valid-repeat median p95 TTFT is >= slo_s.
+
+    A rate cannot establish a crossing unless it has at least min_valid_repeats
+    valid repeats. Returns None when no clean monotonic crossing exists.
+    """
     ordered = sorted(aggregates, key=lambda row: row["offered_rps"])
     for row in ordered:
+        if not row.get("aggregate_valid"):
+            continue
+        if int(row.get("valid_repeat_count") or 0) < min_valid_repeats:
+            continue
         p95 = row.get("headline_p95_ttft_s_median")
         if p95 is not None and p95 >= slo_s:
             return float(row["offered_rps"])
     return None
+
+
+def first_slo_violation(
+    aggregates: list[dict[str, Any]],
+    slo_s: float = 1.0,
+    min_valid_repeats: int = MIN_VALID_REPEATS_FOR_CLEAN,
+) -> float | None:
+    """Alias for first_clean_slo_violation. Invalid aggregates cannot cross."""
+    return first_clean_slo_violation(aggregates, slo_s=slo_s, min_valid_repeats=min_valid_repeats)
+
+
+def first_observed_valid_collapse_rps(aggregates: list[dict[str, Any]], slo_s: float = 1.0) -> float | None:
+    """Lowest tested rate with at least one valid repeat whose p95 TTFT >= slo_s."""
+    ordered = sorted(aggregates, key=lambda row: row["offered_rps"])
+    for row in ordered:
+        for value in row.get("valid_repeat_p95s") or []:
+            if value is not None and value >= slo_s:
+                return float(row["offered_rps"])
+    return None
+
+
+def instability_region_rps(aggregates: list[dict[str, Any]], slo_s: float = 1.0) -> list[float] | None:
+    """Min and max tested rates that look unstable from valid repeats.
+
+    A rate is included if valid repeats mix pass/fail, or a valid repeat
+    collapsed, or a valid repeat showed a waiting queue. This is a description
+    of the tested points, not a fitted threshold.
+    """
+    interesting: list[float] = []
+    for row in sorted(aggregates, key=lambda item: item["offered_rps"]):
+        p95s = [value for value in (row.get("valid_repeat_p95s") or []) if value is not None]
+        if not p95s:
+            continue
+        passes = sum(1 for value in p95s if value < slo_s)
+        fails = sum(1 for value in p95s if value >= slo_s)
+        if (passes and fails) or fails or row.get("any_valid_waiting_queue"):
+            interesting.append(float(row["offered_rps"]))
+    if not interesting:
+        return None
+    return [min(interesting), max(interesting)]
 
 
 def _count_by(records: list[dict[str, Any]], key: str) -> dict[str, int]:

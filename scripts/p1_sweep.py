@@ -12,6 +12,7 @@ import asyncio
 import csv
 import importlib.metadata
 import json
+import resource
 import subprocess
 import sys
 import time
@@ -33,8 +34,12 @@ from servescope.metrics import (
     METRIC_KV,
     METRIC_RUNNING,
     METRIC_WAITING,
+    MIN_VALID_REPEATS_FOR_CLEAN,
     aggregate_repeats,
-    first_slo_violation,
+    first_clean_slo_violation,
+    first_observed_valid_collapse_rps,
+    instability_region_rps,
+    mark_repeat_validity,
     parse_prometheus_gauges,
     summarize_repeat,
 )
@@ -211,6 +216,7 @@ async def run_open_loop(
     pending: set[asyncio.Task] = set()
     aborted = False
     abort_reason = None
+    peak_inflight = 0
 
     async def launch(i: int, scheduled_s: float) -> None:
         prompt_id, prompt = select_prompt(int(config["seed"]), i)
@@ -252,6 +258,7 @@ async def run_open_loop(
             break
         task = asyncio.create_task(launch(i, scheduled_s))
         pending.add(task)
+        peak_inflight = max(peak_inflight, len(pending))
         task.add_done_callback(pending.discard)
 
     if pending:
@@ -260,7 +267,12 @@ async def run_open_loop(
     await asyncio.gather(runtime_task, gpu_task)
     duration_s = clock() - t0
     records.sort(key=lambda row: row.get("request_index", 0))
-    meta = {"aborted": aborted, "abort_reason": abort_reason, "duration_s": duration_s}
+    meta = {
+        "aborted": aborted,
+        "abort_reason": abort_reason,
+        "duration_s": duration_s,
+        "peak_inflight": peak_inflight,
+    }
     return records, runtime_rows, gpu_rows, meta
 
 
@@ -293,7 +305,7 @@ def plot_ttft(path: Path, aggregates: list[dict], slo_s: float) -> None:
     p95_max = [row.get("headline_p95_ttft_s_max") for row in aggregates]
     fig, ax = plt.subplots(figsize=(7.2, 4.2))
     ax.plot(xs, p50, marker="o", label="p50 client TTFT")
-    ax.plot(xs, p95, marker="o", label="p95 client TTFT (median repeat)")
+    ax.plot(xs, p95, marker="o", label="p95 client TTFT (median valid repeat)")
     if all(v is not None for v in p95_min + p95_max):
         ax.fill_between(xs, p95_min, p95_max, color="tab:orange", alpha=0.2, label="p95 repeat range")
     ax.axhline(slo_s, color="red", linestyle="--", label=f"SLO p95 TTFT = {slo_s:.0f} s")
@@ -312,13 +324,13 @@ def plot_throughput(path: Path, aggregates: list[dict]) -> None:
     tokens = [row.get("headline_output_token_tps_median") for row in aggregates]
     reqs = [row.get("headline_completed_rps_median") for row in aggregates]
     fig, ax1 = plt.subplots(figsize=(7.2, 4.2))
-    ax1.plot(xs, tokens, marker="o", color="tab:blue", label="output tokens / sec")
+    ax1.plot(xs, tokens, marker="o", color="tab:blue", label="wall-clock output tokens / sec")
     ax1.set_xlabel("offered requests / sec")
-    ax1.set_ylabel("output tokens / sec")
+    ax1.set_ylabel("wall-clock output tokens / sec")
     ax2 = ax1.twinx()
-    ax2.plot(xs, reqs, marker="s", color="tab:green", label="completed requests / sec")
-    ax2.set_ylabel("completed requests / sec")
-    ax1.set_title("Throughput vs offered load")
+    ax2.plot(xs, reqs, marker="s", color="tab:green", label="wall-clock completed requests / sec")
+    ax2.set_ylabel("wall-clock completed requests / sec")
+    ax1.set_title("Wall-clock throughput vs offered load")
     lines = ax1.get_legend_handles_labels()[0] + ax2.get_legend_handles_labels()[0]
     labels = ax1.get_legend_handles_labels()[1] + ax2.get_legend_handles_labels()[1]
     ax1.legend(lines, labels, loc="best")
@@ -346,7 +358,12 @@ async def run_suite(config: dict, rates: list[float], repeats: int, duration_s: 
         max_connections=int(config["client_max_connections"]),
         max_keepalive_connections=int(config["client_max_connections"]),
     )
-    timeout = httpx.Timeout(float(config["request_timeout_s"]))
+    timeout = httpx.Timeout(
+        connect=30.0,
+        read=float(config["request_timeout_s"]),
+        write=30.0,
+        pool=2.0,
+    )
     start = datetime.now(timezone.utc).isoformat()
     pre_gpu = nvidia_smi_snapshot()
     pre_smi = nvidia_smi_processes()
@@ -363,10 +380,19 @@ async def run_suite(config: dict, rates: list[float], repeats: int, duration_s: 
         print(f"post-warmup idle={idle}", flush=True)
         await asyncio.sleep(float(config["inter_run_idle_s"]))
 
+        min_valid = int(config.get("min_valid_repeats", MIN_VALID_REPEATS_FOR_CLEAN))
+        max_attempts = int(config.get("max_repeat_attempts", repeats))
+        if mode != "validation":
+            min_valid = repeats
+            max_attempts = repeats
+
         for rate in rates:
             rate_summaries: list[dict] = []
-            for repeat in range(1, repeats + 1):
-                repeat_id = f"{mode}-rps{rate:g}-rep{repeat}"
+            valid_count = 0
+            attempt = 0
+            while attempt < max_attempts and valid_count < min_valid:
+                attempt += 1
+                repeat_id = f"{mode}-rps{rate:g}-rep{attempt}"
                 print(f"=== {repeat_id} n~{max(8, int(rate * duration_s))} ===", flush=True)
                 idle = await wait_until_idle(client, config)
                 if not idle:
@@ -397,6 +423,7 @@ async def run_suite(config: dict, rates: list[float], repeats: int, duration_s: 
                         "repeat_id": repeat_id,
                         "aborted": meta["aborted"],
                         "abort_reason": meta["abort_reason"],
+                        "peak_inflight": meta["peak_inflight"],
                         "max_waiting_requests": max(waiting_vals) if waiting_vals else None,
                         "typical_waiting_requests": (
                             sorted(waiting_vals)[len(waiting_vals) // 2] if waiting_vals else None
@@ -404,19 +431,27 @@ async def run_suite(config: dict, rates: list[float], repeats: int, duration_s: 
                         "max_kv_cache_usage_perc": max(kv_vals) if kv_vals else None,
                     }
                 )
-                if meta["aborted"]:
-                    summary["client_limited"] = True
+                mark_repeat_validity(summary, max_inflight=int(config["max_inflight"]))
+                if summary["valid_offered_load"]:
+                    valid_count += 1
                 rate_summaries.append(summary)
                 all_repeat_summaries.append(summary)
                 print(
                     f"{repeat_id} completed={summary['completed_count']}/{summary['request_count']} "
-                    f"ttft_p95={summary['client_ttft_p95_s']} client_limited={summary['client_limited']}",
+                    f"ttft_p95={summary['client_ttft_p95_s']} valid={summary['valid_offered_load']} "
+                    f"peak_inflight={summary['peak_inflight']} reason={summary['invalid_reason']}",
                     flush=True,
                 )
                 idle = await wait_until_idle(client, config)
                 print(f"drain idle={idle}", flush=True)
                 await asyncio.sleep(float(config["inter_run_idle_s"]))
-            aggregates.append(aggregate_repeats(rate_summaries))
+            aggregates.append(
+                aggregate_repeats(
+                    rate_summaries,
+                    min_valid_repeats=int(config.get("min_valid_repeats", MIN_VALID_REPEATS_FOR_CLEAN)),
+                    slo_s=float(config["slo_p95_ttft_seconds"]),
+                )
+            )
 
     write_csv(out_dir / "repeat_summary.csv", all_repeat_summaries)
     write_csv(out_dir / "aggregate_summary.csv", aggregates)
@@ -425,7 +460,12 @@ async def run_suite(config: dict, rates: list[float], repeats: int, duration_s: 
     plot_ttft(out_dir / "ttft_vs_load.png", aggregates, float(config["slo_p95_ttft_seconds"]))
     plot_throughput(out_dir / "throughput_vs_load.png", aggregates)
     versions = package_versions()
-    crossing = first_slo_violation(aggregates, float(config["slo_p95_ttft_seconds"]))
+    slo_s = float(config["slo_p95_ttft_seconds"])
+    min_valid_repeats = int(config.get("min_valid_repeats", MIN_VALID_REPEATS_FOR_CLEAN))
+    crossing = first_clean_slo_violation(aggregates, slo_s, min_valid_repeats)
+    observed_collapse = first_observed_valid_collapse_rps(aggregates, slo_s)
+    unstable = instability_region_rps(aggregates, slo_s)
+    nofile_soft, nofile_hard = resource.getrlimit(resource.RLIMIT_NOFILE)
     end = datetime.now(timezone.utc).isoformat()
     manifest = {
         "suite_id": suite_id,
@@ -451,6 +491,11 @@ async def run_suite(config: dict, rates: list[float], repeats: int, duration_s: 
             "vLLM is running with --enforce-eager. That is a known WSL limitation, not a tuned serving mode.",
             "P1 timings are measured on a controlled 64-token interactive workload. They are not general chat SLOs.",
             "prefix caching stays at the vLLM default (enabled).",
+            "Wall-clock throughput divides completed work by the full repeat duration, including tail drain after the last scheduled arrival. It is not kernel/model-only decode throughput.",
+            (
+                "ulimit -n is 10240. max_inflight=4096 and client_max_connections=6144 so the "
+                "HTTP pool is larger than the explicit in-flight cap and both stay under the FD limit."
+            ),
         ],
         "slo_p95_ttft_seconds": config["slo_p95_ttft_seconds"],
         "percentile_method": config["percentile_method"],
@@ -460,7 +505,14 @@ async def run_suite(config: dict, rates: list[float], repeats: int, duration_s: 
         "repeats": repeats,
         "duration_s": duration_s,
         "pre_run_gpu": pre_gpu,
-        "first_tested_slo_violation_rps": crossing,
+        "first_clean_slo_violation_rps": crossing,
+        "first_observed_valid_collapse_rps": observed_collapse,
+        "instability_region_rps": unstable,
+        "min_valid_repeats_for_clean_crossing": min_valid_repeats,
+        "ulimit_n_soft": nofile_soft,
+        "ulimit_n_hard": nofile_hard,
+        "max_inflight": config["max_inflight"],
+        "client_max_connections": config["client_max_connections"],
         "aggregates": aggregates,
         "package_versions": versions,
     }
@@ -468,7 +520,9 @@ async def run_suite(config: dict, rates: list[float], repeats: int, duration_s: 
     (out_dir / "result.json").write_text(
         json.dumps(
             {
-                "first_tested_slo_violation_rps": crossing,
+                "first_clean_slo_violation_rps": crossing,
+                "first_observed_valid_collapse_rps": observed_collapse,
+                "instability_region_rps": unstable,
                 "slo": "p95 client TTFT < 1.0 s",
                 "aggregates": aggregates,
             },
@@ -483,7 +537,7 @@ async def run_suite(config: dict, rates: list[float], repeats: int, duration_s: 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="P1 open-loop saturation sweep")
     parser.add_argument("--config", type=Path, default=ROOT / "configs" / "p1_short_chat.json")
-    parser.add_argument("--mode", choices=("smoke", "pilot", "final"), required=True)
+    parser.add_argument("--mode", choices=("smoke", "pilot", "final", "validation"), required=True)
     parser.add_argument("--rates", default=None, help="comma-separated offered RPS list")
     parser.add_argument("--out", type=Path, default=None)
     return parser.parse_args()
@@ -500,11 +554,15 @@ def main() -> int:
         rates = [float(x) for x in config["pilot_rates_rps"]]
         repeats = 1
         duration_s = float(config["pilot_duration_s"])
+    elif args.mode == "validation":
+        rates = [float(x) for x in args.rates.split(",")] if args.rates else [120.0, 128.0, 132.0, 136.0]
+        repeats = int(config.get("min_valid_repeats", 3))
+        duration_s = float(config["final_duration_s"])
     else:
         rates = [float(x) for x in args.rates.split(",")] if args.rates else [2.0, 4.0, 8.0, 16.0]
         repeats = int(config["repeats"])
         duration_s = float(config["final_duration_s"])
-    if args.rates and args.mode != "final":
+    if args.rates and args.mode not in {"final", "validation"}:
         rates = [float(x) for x in args.rates.split(",")]
     stamp = now_utc()
     out = args.out or (ROOT / "artifacts" / "p1" / f"{args.mode}-{stamp}")

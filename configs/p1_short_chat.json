@@ -14,14 +14,16 @@
   "pilot_duration_s": 20,
   "final_duration_s": 45,
   "repeats": 3,
+  "min_valid_repeats": 3,
+  "max_repeat_attempts": 5,
   "request_timeout_s": 120,
   "drain_poll_s": 0.5,
   "drain_idle_needed": 4,
   "drain_timeout_s": 180,
   "inter_run_idle_s": 2.0,
-  "max_inflight": 2048,
+  "max_inflight": 4096,
   "runtime_sample_interval_s": 0.5,
   "gpu_sample_interval_s": 1.0,
-  "client_max_connections": 2048,
+  "client_max_connections": 6144,
   "percentile_method": "numpy.percentile method='linear' (R type 7)"
 }

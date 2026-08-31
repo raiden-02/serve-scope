@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 from servescope.metrics import (
+    aggregate_repeats,
     classify_status,
     extract_backend_metrics,
     extract_finish_reason,
     extract_usage,
+    first_clean_slo_violation,
+    first_observed_valid_collapse_rps,
     first_slo_violation,
     is_nonempty_generated_content,
+    mark_repeat_validity,
     percentile,
     summarize_repeat,
     sse_data_payloads,
@@ -160,12 +164,141 @@ def test_repeat_summary_marks_client_limited_and_preserves_counts():
     assert summary["completed_count"] == 2
     assert summary["error_count"] == 1
     assert summary["client_limited"] is False
-    assert summary["output_token_throughput_tps"] == 128.0
+    assert summary["wall_clock_output_token_throughput_tps"] == 128.0
     assert summary["client_ttft_n"] == 2
 
 
+def test_premature_eof_without_finish_reason_is_not_success():
+    assert (
+        classify_status(
+            http_status=200,
+            finish_reason=None,
+            got_content=True,
+            stream_done=False,
+            timed_out=False,
+            cancelled=False,
+            stream_error=False,
+            error_message=None,
+        )
+        == "stream_error"
+    )
+    assert (
+        classify_status(
+            http_status=200,
+            finish_reason=None,
+            got_content=True,
+            stream_done=True,
+            timed_out=False,
+            cancelled=False,
+            stream_error=False,
+            error_message=None,
+        )
+        == "stream_error"
+    )
+
+
+def test_pool_timeout_is_client_capacity():
+    assert (
+        classify_status(
+            http_status=None,
+            finish_reason=None,
+            got_content=False,
+            stream_done=False,
+            timed_out=False,
+            cancelled=False,
+            stream_error=False,
+            error_message="PoolTimeout",
+            client_capacity=True,
+        )
+        == "client_capacity"
+    )
+
+
+def _repeat(*, rps, p95, valid=True, aborted=False, waiting=0.0, tok_tps=100.0, req_tps=10.0, p50=0.05):
+    row = {
+        "offered_rps": rps,
+        "client_ttft_p50_s": p50,
+        "client_ttft_p95_s": p95,
+        "wall_clock_output_token_throughput_tps": tok_tps,
+        "wall_clock_completed_request_throughput_rps": req_tps,
+        "client_limited": not valid,
+        "aborted": aborted,
+        "max_waiting_requests": waiting,
+        "actual_dispatch_rps": rps if valid else rps * 0.5,
+        "median_dispatch_lag_s": 0.001,
+        "status_counts": {},
+    }
+    return mark_repeat_validity(row, max_inflight=4096)
+
+
+def test_client_limited_repeats_excluded_from_headline():
+    summaries = [
+        _repeat(rps=132, p95=0.08, valid=True),
+        _repeat(rps=132, p95=0.09, valid=True),
+        _repeat(rps=132, p95=14.7, valid=False, aborted=True),
+    ]
+    agg = aggregate_repeats(summaries, min_valid_repeats=3, slo_s=1.0)
+    assert agg["total_repeat_count"] == 3
+    assert agg["valid_repeat_count"] == 2
+    assert agg["invalid_repeat_count"] == 1
+    assert agg["aggregate_valid"] is False
+    assert agg["all_repeat_p95s"] == [0.08, 0.09, 14.7]
+    assert agg["valid_repeat_p95s"] == [0.08, 0.09]
+    assert abs(agg["headline_p95_ttft_s_median"] - 0.085) < 1e-12
+    assert first_clean_slo_violation([agg], slo_s=1.0) is None
+    assert first_slo_violation([agg], slo_s=1.0) is None
+
+
+def test_clean_crossing_requires_three_valid_repeats():
+    failing = [
+        _repeat(rps=132, p95=2.0, valid=True),
+        _repeat(rps=132, p95=2.1, valid=True),
+        _repeat(rps=132, p95=2.2, valid=True),
+    ]
+    agg = aggregate_repeats(failing, min_valid_repeats=3, slo_s=1.0)
+    assert agg["aggregate_valid"] is True
+    assert first_clean_slo_violation([agg], slo_s=1.0) == 132.0
+
+
+def test_invalid_aggregate_cannot_be_first_clean_crossing():
+    mixed_invalid = [
+        _repeat(rps=132, p95=19.0, valid=True),
+        _repeat(rps=132, p95=14.7, valid=False, aborted=True),
+        _repeat(rps=132, p95=21.0, valid=True),
+    ]
+    agg = aggregate_repeats(mixed_invalid, min_valid_repeats=3, slo_s=1.0)
+    assert agg["aggregate_valid"] is False
+    assert first_clean_slo_violation([agg], slo_s=1.0) is None
+
+
+def test_mixed_valid_repeats_are_not_universally_healthy():
+    mixed = [
+        _repeat(rps=128, p95=0.08, valid=True, waiting=0.0),
+        _repeat(rps=128, p95=0.09, valid=True, waiting=0.0),
+        _repeat(rps=128, p95=12.0, valid=True, waiting=300.0),
+    ]
+    agg = aggregate_repeats(mixed, min_valid_repeats=3, slo_s=1.0)
+    assert agg["aggregate_valid"] is True
+    assert agg["slo_met_all_valid_repeats"] is False
+    assert agg["valid_repeats_mixed_slo"] is True
+    assert agg["any_valid_waiting_queue"] is True
+    assert first_observed_valid_collapse_rps([agg], slo_s=1.0) == 128.0
+
+
 def test_first_slo_violation_does_not_invent_crossing():
-    ok = {"offered_rps": 2.0, "headline_p95_ttft_s_median": 0.4}
-    bad = {"offered_rps": 8.0, "headline_p95_ttft_s_median": 1.4}
-    assert first_slo_violation([ok, bad], slo_s=1.0) == 8.0
+    ok = {
+        "offered_rps": 2.0,
+        "aggregate_valid": True,
+        "valid_repeat_count": 3,
+        "headline_p95_ttft_s_median": 0.4,
+        "valid_repeat_p95s": [0.3, 0.4, 0.4],
+    }
+    bad = {
+        "offered_rps": 8.0,
+        "aggregate_valid": True,
+        "valid_repeat_count": 3,
+        "headline_p95_ttft_s_median": 1.4,
+        "valid_repeat_p95s": [1.2, 1.4, 1.5],
+    }
+    assert first_clean_slo_violation([ok, bad], slo_s=1.0) == 8.0
     assert first_slo_violation([ok], slo_s=1.0) is None
