@@ -1,0 +1,141 @@
+{
+  "suite_id": "final-2026-08-31T13-09-14Z",
+  "mode": "final",
+  "git": {
+    "commit": "c40982e2d3d5b4dc03f88a34778a8f957634fcc1",
+    "dirty": true,
+    "branch": "p2-mixed-interference"
+  },
+  "model": "Qwen/Qwen3-1.7B",
+  "backend": "vllm",
+  "backend_version": "0.28.0",
+  "torch_version": "2.13.0+cu130",
+  "torch_cuda_build": "13.0",
+  "gpu": "NVIDIA GeForce RTX 4080 SUPER",
+  "server_command": "vllm serve Qwen/Qwen3-1.7B --gpu-memory-utilization 0.85 --enforce-eager --enable-per-request-metrics",
+  "server_env": {
+    "VLLM_WSL2_ENABLE_PIN_MEMORY": "1",
+    "VLLM_USE_FLASHINFER_SAMPLER": "0",
+    "HF_HOME": "/home/mayur/.cache/huggingface"
+  },
+  "notes": [
+    "WSLg/Xwayland shares the GPU with the vLLM process.",
+    "vLLM is running with --enforce-eager. That is a known WSL limitation, not a tuned serving mode.",
+    "Interactive traffic is the P1 short 64-token workload at a fixed 64 RPS.",
+    "Background traffic is a synthetic longer document-summarization job. It is not production data.",
+    "Prefix caching stays at the vLLM default (enabled).",
+    "No request priority, admission control, or ServeScope intervention is used.",
+    "The server stays on default scheduling behavior.",
+    "Separate HTTP clients: interactive 2560 connections / 2048 in-flight, background 640 connections / 512 in-flight. ulimit -n soft=10240."
+  ],
+  "slo_p95_ttft_seconds": 1.0,
+  "percentile_method": "numpy.percentile method='linear' (R type 7)",
+  "start_utc": "2026-08-31T13:09:14.386921+00:00",
+  "end_utc": "2026-08-31T13:16:18.530145+00:00",
+  "scenario_timing": {
+    "duration_s": 60,
+    "pre_burst_end_s": 15,
+    "burst_end_s": 30,
+    "interactive_rps": 64
+  },
+  "selected_background_rps": 16.0,
+  "selection_reason": "lowest tested background offered rate with a sustained waiting queue and valid interactive+background schedules (16 RPS)",
+  "background_rates_tested_rps": [
+    4.0,
+    8.0,
+    16.0
+  ],
+  "class_configs": {
+    "interactive": {
+      "workload_class": "interactive",
+      "offered_rps": 64,
+      "min_tokens": 64,
+      "max_completion_tokens": 64,
+      "temperature": 0,
+      "max_inflight": 2048,
+      "client_max_connections": 2560
+    },
+    "background": {
+      "workload_class": "background",
+      "pilot_rates_rps": [
+        4,
+        8,
+        16
+      ],
+      "extra_probe_rps": 32,
+      "min_tokens": 256,
+      "max_completion_tokens": 256,
+      "temperature": 0,
+      "max_inflight": 512,
+      "client_max_connections": 640
+    }
+  },
+  "ulimit_n_soft": 10240,
+  "ulimit_n_hard": 1048576,
+  "aggregates": {
+    "valid_control_repeats": 3,
+    "valid_mixed_repeats": 3,
+    "control_aligned_p95": {
+      "n": 3,
+      "median": 0.045613551651058515,
+      "min": 0.04478964669942797,
+      "max": 0.04679653489993143
+    },
+    "mixed_pre_p95": {
+      "n": 3,
+      "median": 0.049129502349751414,
+      "min": 0.048753622099502535,
+      "max": 0.049305686649859126
+    },
+    "mixed_burst_p95": {
+      "n": 3,
+      "median": 2.409129604099598,
+      "min": 1.8773267803499945,
+      "max": 3.9700196440010584
+    },
+    "mixed_recovery_p95": {
+      "n": 3,
+      "median": 5.356212104400037,
+      "min": 5.183581704000244,
+      "max": 5.716308586499508
+    },
+    "interference_ratio": {
+      "n": 3,
+      "median": 53.78764472661862,
+      "min": 41.157215616785436,
+      "max": 84.83576086328725
+    },
+    "absolute_ttft_increase_s": {
+      "n": 3,
+      "median": 2.36433995740017,
+      "min": 1.831713228698936,
+      "max": 3.923223109101127
+    },
+    "max_waiting_requests": {
+      "n": 3,
+      "median": 163.0,
+      "min": 152.0,
+      "max": 290.0
+    },
+    "background_completed": {
+      "n": 3,
+      "median": 240.0,
+      "min": 240,
+      "max": 240
+    },
+    "background_output_token_goodput_tps": {
+      "n": 3,
+      "median": 2425.1856167647393,
+      "min": 2132.8560526554634,
+      "max": 2491.776391167083
+    }
+  },
+  "conclusion": "clear reproducible interference",
+  "package_versions": {
+    "vllm": "0.28.0",
+    "torch": "2.13.0+cu130",
+    "httpx": "0.28.1",
+    "numpy": "2.3.5",
+    "matplotlib": "3.11.1"
+  }
+}

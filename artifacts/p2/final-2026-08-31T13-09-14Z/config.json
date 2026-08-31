@@ -1,0 +1,45 @@
+{
+  "model": "Qwen/Qwen3-1.7B",
+  "base_url": "http://127.0.0.1:8000",
+  "chat_path": "/v1/chat/completions",
+  "metrics_path": "/metrics",
+  "slo_p95_ttft_seconds": 1.0,
+  "seed": 20260830,
+  "warmup_requests": 8,
+  "scenario_duration_s": 60,
+  "pre_burst_end_s": 15,
+  "burst_end_s": 30,
+  "interactive": {
+    "workload_class": "interactive",
+    "offered_rps": 64,
+    "min_tokens": 64,
+    "max_completion_tokens": 64,
+    "temperature": 0,
+    "max_inflight": 2048,
+    "client_max_connections": 2560
+  },
+  "background": {
+    "workload_class": "background",
+    "pilot_rates_rps": [
+      4,
+      8,
+      16
+    ],
+    "extra_probe_rps": 32,
+    "min_tokens": 256,
+    "max_completion_tokens": 256,
+    "temperature": 0,
+    "max_inflight": 512,
+    "client_max_connections": 640
+  },
+  "min_valid_repeats": 3,
+  "max_repeat_attempts": 5,
+  "request_timeout_s": 180,
+  "drain_poll_s": 0.5,
+  "drain_idle_needed": 4,
+  "drain_timeout_s": 240,
+  "inter_run_idle_s": 2.0,
+  "runtime_sample_interval_s": 0.5,
+  "gpu_sample_interval_s": 1.0,
+  "percentile_method": "numpy.percentile method='linear' (R type 7)"
+}

@@ -1,8 +1,10 @@
 # ServeScope
 
-ServeScope is a local LLM inference lab for seeing when interactive responsiveness breaks down as a GPU-backed server is given more work.
+ServeScope is a local LLM inference lab. It overloads a real GPU-backed server and measures when interactive replies start to feel slow.
 
-It runs a real OpenAI-compatible vLLM server on this machine's RTX 4080 SUPER. P1 measures offered request load against a chosen first-token target. It is a measurement lab, not a production serving product and not a new inference runtime.
+Interactive traffic is fast by itself. ServeScope then injects longer background jobs onto the same GPU and measures whether users wait longer for replies to start.
+
+It runs a real OpenAI-compatible vLLM server on this machine's RTX 4080 SUPER. It is a measurement lab, not a production serving product and not a new inference runtime.
 
 ## What the words mean
 
@@ -12,6 +14,28 @@ It runs a real OpenAI-compatible vLLM server on this machine's RTX 4080 SUPER. P
 - **Queue:** requests waiting because the server is already busy. vLLM exposes this as `vllm:num_requests_waiting`.
 - **p95:** 95% of measured values are at or below this number. The slowest 5% are worse.
 - **SLO:** a chosen target, not a universal industry standard. P1 uses **p95 client TTFT < 1.0 second**.
+
+## P2 result
+
+On this machine, with this model, a healthy 64 RPS interactive stream, and a synthetic 256-token background burst:
+
+**Background work damaged interactive responsiveness.** The interactive load was healthy by itself. After a 16 RPS background burst started at t=15 s, a vLLM waiting queue appeared and interactive p95 TTFT moved from tens of milliseconds to a few seconds.
+
+Corrected evidence: `artifacts/p2/final-2026-08-31T13-09-14Z/`. Pilot that selected 16 RPS: `artifacts/p2/pilot-2026-08-31T13-03-48Z/`.
+
+| Window | Control interactive p95 TTFT | Mixed interactive p95 TTFT |
+|---|---|---|
+| pre (0-15 s) | 46-48 ms | 49 ms. SLO met |
+| burst (15-30 s) | 45-47 ms | 1.88 s, 2.41 s, 3.97 s. SLO missed |
+| recovery (30-60 s) | 47-49 ms | 5.18-5.72 s. SLO still missed |
+
+Median interference ratio (mixed burst p95 / control aligned-window p95) is about 54. That number is descriptive for this workload. It is not a universal slowdown factor.
+
+Waiting queue went from 0 in control to 152-290 in mixed. All 240 background requests completed. Last background completion was about 40-44 s after scenario start, so work continued into the nominal recovery window. Background output-token goodput was about 2100-2500 tok/s.
+
+4 RPS and 8 RPS background bursts in the pilot did not grow a sustained waiting queue. 16 RPS was the lowest tested rate that did, with both client schedules still valid.
+
+This is not a priority scheduler, admission controller, or ServeScope intervention. The server stayed on default scheduling.
 
 ## P1 result
 
@@ -55,6 +79,22 @@ Arrivals are open-loop: request *i* is scheduled at `t0 + i / offered_rps` on a 
 
 P1 does not include mixed interactive/background traffic, priority scheduling, admission control, a dashboard, or a custom scheduler.
 
+## What P2 is
+
+P2 answers one question:
+
+> Can background AI work damage interactive responsiveness even when the interactive workload is healthy by itself?
+
+Interactive traffic stays at 64 RPS for the whole 60 s scenario. That rate was comfortably healthy in P1. P2 is not placing interactive traffic on the 128 RPS saturation knee and then blaming background work.
+
+Background traffic is a second synthetic class: longer documents (about 924-933 server-reported prompt tokens) and exactly 256 output tokens. Thinking stays off. Arrivals are injected only from 15-30 s. Existing background requests are not cancelled when injection stops.
+
+Control is the same 64 RPS interactive stream with zero background requests. Final evidence is 3 valid control repeats and 3 valid mixed repeats, measured together.
+
+Interactive and background use separate HTTP clients and separate in-flight caps so one shared connection pool cannot fake interference.
+
+P2 does not implement request priority, admission control, a background concurrency controller, or a dashboard.
+
 ## Reproduce P1
 
 Work inside WSL2 Ubuntu. Keep the Hugging Face cache on the Linux filesystem, not `/mnt/c`.
@@ -90,9 +130,12 @@ python scripts/p1_sweep.py --mode smoke
 python scripts/p1_sweep.py --mode pilot
 python scripts/p1_sweep.py --mode final --rates 8,64,128,132,136,144
 python scripts/p1_sweep.py --mode validation --rates 120,128,132,136
+python -m pytest tests/test_p1_metrics.py tests/test_p2_metrics.py
+python scripts/p2_mixed.py --mode pilot
+python scripts/p2_mixed.py --mode final --pilot-dir artifacts/p2/pilot-<UTC>/
 ```
 
-Config: `configs/p1_short_chat.json`.
+P1 config: `configs/p1_short_chat.json`. P2 config: `configs/p2_mixed.json`.
 
 Each suite writes an immutable directory:
 
@@ -108,6 +151,8 @@ artifacts/p1/<mode>-<UTC>/
   ttft_vs_load.png
   throughput_vs_load.png
 ```
+
+P2 suites write `artifacts/p2/<mode>-<UTC>/` with the same raw request file plus `phase_summary.csv`, `interactive_ttft_timeline.png`, `queue_timeline.png`, and `control_vs_mixed.png`.
 
 `requests.jsonl` is the source of truth for request metrics.
 
@@ -140,6 +185,8 @@ Derived:
 - **Client-limited run:** attempt dispatch rate < 90% of offered, or median attempt dispatch lag > 50 ms, or the in-flight safety cap aborted the run, or httpx hit `PoolTimeout`. Those runs stay in diagnostics. They do not establish a clean threshold.
 - **Clean SLO violation:** at least three valid repeats, and every valid repeat has p95 client TTFT >= 1 s (`slo_violated_all_valid_repeats`). fail + fail + pass is `valid_repeats_mixed_slo`, not a crossing.
 - **Wall-clock throughput:** completed requests or output tokens divided by the full repeat wall-clock, including drain after the last scheduled arrival.
+- **P2 phase:** `pre_burst` is [0, 15) s, `burst_injection` is [15, 30) s, `recovery` is [30, 60) s, from the request's attempt time relative to scenario start. Completion time does not move a request into a later phase.
+- **Interference ratio:** mixed burst-phase interactive p95 TTFT divided by the control repeat's aligned 15-30 s p95. Descriptive only.
 
 ## Environment
 
@@ -178,4 +225,4 @@ This machine needed a host C compiler for Triton. gcc 13.3 was extracted into `/
 
 ## What is not here
 
-P1 does not implement mixed interactive/background traffic, request priority, admission control, ServeScope scheduling, a frontend, Prometheus/Grafana, or a second inference backend. Those are later checkpoints if the measurements justify them.
+P2 measures mixed interactive and background traffic on the default vLLM scheduler. It does not implement request priority, `X-Vllm-Priority`, admission control, a background concurrency controller, ServeScope scheduling, a frontend, or a second inference backend. Those are later checkpoints if the measurements justify them.

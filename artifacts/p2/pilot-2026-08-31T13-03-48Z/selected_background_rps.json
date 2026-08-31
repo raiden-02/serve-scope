@@ -1,0 +1,9 @@
+{
+  "selected_background_rps": 16.0,
+  "selection_reason": "lowest tested background offered rate with a sustained waiting queue and valid interactive+background schedules (16 RPS)",
+  "rates_tested": [
+    4.0,
+    8.0,
+    16.0
+  ]
+}
