@@ -1,0 +1,230 @@
+{
+  "suite_id": "comparison-2026-08-31T16-29-56Z",
+  "git": {
+    "commit": "a96546ab2e02cedcbea7d407b3af5dd7a15611f4",
+    "dirty": true,
+    "branch": "p3-native-priority"
+  },
+  "source_hashes": {
+    "scripts/p3_native_priority.py": "6975f1a38a599436c54f4e584be7cd26b0f794dce8145556b0a1d8b0779c2b2d",
+    "scripts/p2_mixed.py": "304bffea81e9947ee5dfb0ee0201947538e97314f4581d6f71f67e8d0743a60b",
+    "servescope/p3_metrics.py": "1489a6991cd26736541e95bba6912540aacea5747041e9797f531b0823f0cee1",
+    "servescope/p2_metrics.py": "075031fca19a2062998d9da06e6ca60ee17a7f72ec48a5ca1f8cc634f32d665a",
+    "servescope/client.py": "1a6c17b1dc3cd0e72e395fc2eb8bb6dd71eef3fdba0b118466bfa0f45a2d5d21",
+    "servescope/metrics.py": "e73bad2a657a86aef383f917a24d60ffb24180c36e3ea02ddae5da43bb21dfcf",
+    "servescope/workload.py": "a56cb75c917f22484b77d68654607fbcab677a844737f28e82f1f1a077a3c65e",
+    "configs/p3_native_priority.json": "6d028aeaf8b4d719b87e1682249e6aa60561b707e2d6b4150b90bb2d4e963c71"
+  },
+  "model": "Qwen/Qwen3-1.7B",
+  "backend": "vllm",
+  "backend_version": "0.28.0",
+  "scheduler_policy": "fcfs_vs_priority",
+  "server_command": "vllm serve Qwen/Qwen3-1.7B --gpu-memory-utilization 0.85 --enforce-eager --enable-per-request-metrics",
+  "server_env": {
+    "VLLM_WSL2_ENABLE_PIN_MEMORY": "1",
+    "VLLM_USE_FLASHINFER_SAMPLER": "0",
+    "HF_HOME": "/home/mayur/.cache/huggingface"
+  },
+  "priority_mechanism": "OpenAI chat request-body field `priority`",
+  "priority_semantics": "lower integer is handled earlier; ties by arrival time then request id",
+  "class_priorities": {
+    "interactive": 0,
+    "background": 1
+  },
+  "class_configs": {
+    "interactive": {
+      "workload_class": "interactive",
+      "offered_rps": 64,
+      "min_tokens": 64,
+      "max_completion_tokens": 64,
+      "temperature": 0,
+      "max_inflight": 2048,
+      "client_max_connections": 2560,
+      "priority": 0
+    },
+    "background": {
+      "workload_class": "background",
+      "offered_rps": 16,
+      "pilot_rates_rps": [
+        4,
+        8,
+        16
+      ],
+      "extra_probe_rps": 32,
+      "min_tokens": 256,
+      "max_completion_tokens": 256,
+      "temperature": 0,
+      "max_inflight": 512,
+      "client_max_connections": 640,
+      "priority": 1
+    },
+    "telemetry": {
+      "client_max_connections": 8,
+      "max_inflight": 4
+    }
+  },
+  "ulimit_n_soft": 10240,
+  "ulimit_n_hard": 1048576,
+  "notes": [
+    "WSLg/Xwayland shares the GPU with the vLLM process.",
+    "vLLM is running with --enforce-eager. That is a known WSL limitation.",
+    "P3 isolates native --scheduling-policy only. No ServeScope scheduler.",
+    "Interactive and background keep separate HTTP pools. Telemetry is a third small client."
+  ],
+  "package_versions": {
+    "vllm": "0.28.0",
+    "torch": "2.13.0+cu130",
+    "httpx": "0.28.1",
+    "numpy": "2.3.5",
+    "matplotlib": "3.11.1"
+  },
+  "mode": "comparison",
+  "fcfs_dir": "artifacts/p3/fcfs-2026-08-31T16-07-48Z",
+  "priority_dir": "artifacts/p3/priority-2026-08-31T16-24-57Z",
+  "conclusion": "native priority substantially solves P2",
+  "aggregates": {
+    "fcfs_burst_p95": {
+      "n": 3,
+      "median": 3.3279914029530118,
+      "min": 3.320712873047705,
+      "max": 3.356345438900643
+    },
+    "priority_burst_p95": {
+      "n": 3,
+      "median": 0.8363107446995854,
+      "min": 0.8265172047020314,
+      "max": 0.8379164878022493
+    },
+    "absolute_reduction_s": {
+      "n": 3,
+      "median": 2.4916806582534266,
+      "min": 2.482796385245456,
+      "max": 2.529828234198612
+    },
+    "priority_protection_ratio": {
+      "n": 3,
+      "median": 0.25129594504285846,
+      "min": 0.2462551068559718,
+      "max": 0.2523303037137387
+    },
+    "fcfs_waiting": {
+      "n": 3,
+      "median": 238.0,
+      "min": 235.0,
+      "max": 242.0
+    },
+    "priority_waiting": {
+      "n": 3,
+      "median": 144.0,
+      "min": 144.0,
+      "max": 146.0
+    },
+    "fcfs_background_tok_tps": {
+      "n": 3,
+      "median": 2240.0965168917896,
+      "min": 2202.7143699842704,
+      "max": 2249.713619392822
+    },
+    "priority_background_tok_tps": {
+      "n": 3,
+      "median": 1582.9947867569465,
+      "min": 1581.5473630282636,
+      "max": 1584.9280179667437
+    },
+    "fcfs_background_e2e_p95": {
+      "n": 3,
+      "median": 12.767509613299444,
+      "min": 12.706075280101322,
+      "max": 12.81734665689928
+    },
+    "priority_background_e2e_p95": {
+      "n": 3,
+      "median": 26.253459596550965,
+      "min": 26.17889404635298,
+      "max": 26.255004917599216
+    },
+    "fcfs_last_bg": {
+      "n": 3,
+      "median": 42.42889742000261,
+      "min": 42.31127434799782,
+      "max": 42.893224458002805
+    },
+    "priority_last_bg": {
+      "n": 3,
+      "median": 53.813809319999564,
+      "min": 53.76628475899997,
+      "max": 53.850661787997524
+    },
+    "fcfs_post_bg_p95": {
+      "n": 3,
+      "median": 5.4036092445003305,
+      "min": 5.3108361949984095,
+      "max": 5.540459021601417
+    },
+    "priority_post_bg_p95": {
+      "n": 3,
+      "median": 0.05898321559870962,
+      "min": 0.05849652920078368,
+      "max": 0.06053625925142114
+    },
+    "pairs": [
+      {
+        "pair_index": 1,
+        "fcfs_repeat_id": "fcfs-mixed-rep1",
+        "priority_repeat_id": "priority-mixed-rep1",
+        "fcfs_burst_p95_s": 3.356345438900643,
+        "priority_burst_p95_s": 0.8265172047020314,
+        "absolute_reduction_s": 2.529828234198612,
+        "priority_protection_ratio": 0.2462551068559718,
+        "fcfs_max_waiting": 242.0,
+        "priority_max_waiting": 144.0,
+        "fcfs_background_output_token_tps": 2202.7143699842704,
+        "priority_background_output_token_tps": 1581.5473630282636,
+        "fcfs_background_request_rps": 8.604353007751056,
+        "priority_background_request_rps": 6.177919386829155,
+        "fcfs_last_background_completion_s": 42.893224458002805,
+        "priority_last_background_completion_s": 53.850661787997524,
+        "fcfs_background_e2e_p95_s": 12.81734665689928,
+        "priority_background_e2e_p95_s": 26.253459596550965
+      },
+      {
+        "pair_index": 2,
+        "fcfs_repeat_id": "fcfs-mixed-rep2",
+        "priority_repeat_id": "priority-mixed-rep2",
+        "fcfs_burst_p95_s": 3.320712873047705,
+        "priority_burst_p95_s": 0.8379164878022493,
+        "absolute_reduction_s": 2.482796385245456,
+        "priority_protection_ratio": 0.2523303037137387,
+        "fcfs_max_waiting": 235.0,
+        "priority_max_waiting": 146.0,
+        "fcfs_background_output_token_tps": 2240.0965168917896,
+        "priority_background_output_token_tps": 1582.9947867569465,
+        "fcfs_background_request_rps": 8.750377019108553,
+        "priority_background_request_rps": 6.183573385769322,
+        "fcfs_last_background_completion_s": 42.42889742000261,
+        "priority_last_background_completion_s": 53.813809319999564,
+        "fcfs_background_e2e_p95_s": 12.706075280101322,
+        "priority_background_e2e_p95_s": 26.255004917599216
+      },
+      {
+        "pair_index": 3,
+        "fcfs_repeat_id": "fcfs-mixed-rep3",
+        "priority_repeat_id": "priority-mixed-rep3",
+        "fcfs_burst_p95_s": 3.3279914029530118,
+        "priority_burst_p95_s": 0.8363107446995854,
+        "absolute_reduction_s": 2.4916806582534266,
+        "priority_protection_ratio": 0.25129594504285846,
+        "fcfs_max_waiting": 238.0,
+        "priority_max_waiting": 144.0,
+        "fcfs_background_output_token_tps": 2249.713619392822,
+        "priority_background_output_token_tps": 1584.9280179667437,
+        "fcfs_background_request_rps": 8.78794382575321,
+        "priority_background_request_rps": 6.191125070182593,
+        "fcfs_last_background_completion_s": 42.31127434799782,
+        "priority_last_background_completion_s": 53.76628475899997,
+        "fcfs_background_e2e_p95_s": 12.767509613299444,
+        "priority_background_e2e_p95_s": 26.17889404635298
+      }
+    ]
+  }
+}

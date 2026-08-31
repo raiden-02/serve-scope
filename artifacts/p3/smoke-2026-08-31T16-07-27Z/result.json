@@ -1,0 +1,22 @@
+{
+  "vllm_version": "0.28.0",
+  "scheduling_cli": "--scheduling-policy {fcfs,priority}",
+  "priority_field": "chat request body `priority`",
+  "header_also_exists": "X-Vllm-Priority",
+  "chosen_mechanism": "request-body priority",
+  "semantics": "lower integer is handled earlier",
+  "results": [
+    {
+      "case": "fcfs_default_no_priority_field",
+      "status": "length",
+      "http_status": 200,
+      "error": null
+    },
+    {
+      "case": "fcfs_priority_1_should_reject",
+      "status": "length",
+      "http_status": 200,
+      "error": null
+    }
+  ]
+}

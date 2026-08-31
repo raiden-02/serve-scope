@@ -26,8 +26,9 @@ def build_chat_payload(
     temperature: float,
     min_tokens: int,
     max_completion_tokens: int,
+    priority: int | None = None,
 ) -> dict[str, Any]:
-    return {
+    payload = {
         "model": model,
         "messages": [{"role": "user", "content": prompt}],
         "temperature": temperature,
@@ -39,6 +40,9 @@ def build_chat_payload(
         "reasoning_effort": "none",
         "include_reasoning": False,
     }
+    if priority is not None:
+        payload["priority"] = int(priority)
+    return payload
 
 
 async def stream_chat_request(

@@ -37,6 +37,35 @@ Waiting queue went from 0 in control to 152-290 in mixed. All 240 background req
 
 This is not a priority scheduler, admission controller, or ServeScope intervention. The server stayed on default scheduling.
 
+## P3 result
+
+P2 showed the problem on default vLLM scheduling. P3 asks how much of that mixed-workload damage vLLM's own native priority scheduler can fix before ServeScope adds any policy of its own.
+
+**Native priority substantially reduced the interactive collapse. It did not restore the healthy tens-of-milliseconds burst TTFT, and background work paid for it.**
+
+This session's contemporaneous FCFS mixed burst median was 3.33 s, a bit slower than the historical P2 median of 2.41 s. P3 therefore compares the two policies measured together, not against old P2 numbers.
+
+Evidence: FCFS `artifacts/p3/fcfs-2026-08-31T16-07-48Z/`, native priority `artifacts/p3/priority-2026-08-31T16-24-57Z/`, comparison `artifacts/p3/comparison-2026-08-31T16-29-56Z/`.
+
+The two servers differed only by `--scheduling-policy priority`. Same model, same GPU flags, same 64 RPS interactive / 16 RPS background t=15-30 s workload. Interactive used native request-body `priority=0`. Background used `priority=1`. Lower integer is handled earlier. FCFS benchmark requests did not send a priority field.
+
+| Window | FCFS mixed interactive p95 TTFT | Native-priority mixed interactive p95 TTFT |
+|---|---|---|
+| pre (0-15 s) | 49-55 ms. SLO met | 47-51 ms. SLO met |
+| burst (15-30 s) | 3.32-3.36 s. SLO missed | 827-838 ms. SLO met |
+| 30-60 s backlog window | 5.36-5.62 s. SLO missed | 806-824 ms. SLO met |
+| after last background completion | 5.31-5.54 s. SLO missed | 58-61 ms. SLO met |
+
+Median burst p95 went from 3.33 s to 836 ms. Protection ratio (priority / FCFS) is 0.25. Absolute reduction is about 2.49 s.
+
+One interactive-only control on the priority server stayed at 47 ms burst p95 with a waiting queue of 0. Priority mode itself did not break the healthy workload.
+
+Waiting queue: FCFS 235-242, priority 144-146. All 240 background requests completed in every repeat. Interactive stream errors: 3-6 under FCFS, 0 under priority.
+
+Background cost: output-token goodput fell from about 2240 tok/s to 1583 tok/s. Request goodput fell from about 8.75 to 6.18 rps. Last background completion moved from about 42.4 s to 53.8 s. Background p95 E2E moved from about 12.8 s to 26.3 s.
+
+This is native vLLM priority scheduling, not isolation. The 1 s interactive SLO is met during the mix, but burst p95 is still about 18 times the 47 ms healthy control, and a waiting queue remains. P4 must not claim a ServeScope scheduler for this result.
+
 ## P1 result
 
 On this machine, with this model and this synthetic 64-token interactive workload:
@@ -95,6 +124,16 @@ Interactive and background use separate HTTP clients and separate in-flight caps
 
 P2 does not implement request priority, admission control, a background concurrency controller, or a dashboard.
 
+## What P3 is
+
+P3 answers one question:
+
+> How much of the mixed-workload interference can vLLM's own native priority scheduler solve before ServeScope adds any policy of its own?
+
+It reuses the exact P2 mixed scenario. Interactive and background stay independent open-loop streams. The only added server flag is `--scheduling-policy priority`. Priority values travel in the OpenAI chat request body. The client does not reorder requests.
+
+P3 does not implement a ServeScope scheduler, admission control, background throttle, concurrency intervention, or a frontend.
+
 ## Reproduce P1
 
 Work inside WSL2 Ubuntu. Keep the Hugging Face cache on the Linux filesystem, not `/mnt/c`.
@@ -133,9 +172,25 @@ python scripts/p1_sweep.py --mode validation --rates 120,128,132,136
 python -m pytest tests/test_p1_metrics.py tests/test_p2_metrics.py
 python scripts/p2_mixed.py --mode pilot
 python scripts/p2_mixed.py --mode final --pilot-dir artifacts/p2/pilot-<UTC>/
+python -m pytest tests/test_p1_metrics.py tests/test_p2_metrics.py tests/test_p3_metrics.py
+python scripts/p3_native_priority.py --mode smoke
+python scripts/p3_native_priority.py --mode fcfs
+# stop the FCFS server, then start the same command plus --scheduling-policy priority
+python scripts/p3_native_priority.py --mode priority
+python scripts/p3_native_priority.py --mode compare --fcfs-dir artifacts/p3/fcfs-<UTC>/ --priority-dir artifacts/p3/priority-<UTC>/
 ```
 
-P1 config: `configs/p1_short_chat.json`. P2 config: `configs/p2_mixed.json`.
+P1 config: `configs/p1_short_chat.json`. P2 config: `configs/p2_mixed.json`. P3 config: `configs/p3_native_priority.json`.
+
+Priority server (only difference from the FCFS command above):
+
+```bash
+vllm serve Qwen/Qwen3-1.7B \
+  --gpu-memory-utilization 0.85 \
+  --enforce-eager \
+  --enable-per-request-metrics \
+  --scheduling-policy priority
+```
 
 Each suite writes an immutable directory:
 
@@ -153,6 +208,8 @@ artifacts/p1/<mode>-<UTC>/
 ```
 
 P2 suites write `artifacts/p2/<mode>-<UTC>/` with the same raw request file plus `phase_summary.csv`, `interactive_ttft_timeline.png`, `queue_timeline.png`, and `control_vs_mixed.png`.
+
+P3 writes `artifacts/p3/fcfs-<UTC>/`, `artifacts/p3/priority-<UTC>/`, and `artifacts/p3/comparison-<UTC>/`. Comparison plots are `fcfs_vs_priority_ttft.png`, `fcfs_vs_priority_queue.png`, and `tradeoff.png`. Every P3 request row includes `scheduler_policy` and `request_priority`. The run manifest also stores SHA-256 `source_hashes` for the benchmark files.
 
 `requests.jsonl` is the source of truth for request metrics.
 
@@ -225,4 +282,4 @@ This machine needed a host C compiler for Triton. gcc 13.3 was extracted into `/
 
 ## What is not here
 
-P2 measures mixed interactive and background traffic on the default vLLM scheduler. It does not implement request priority, `X-Vllm-Priority`, admission control, a background concurrency controller, ServeScope scheduling, a frontend, or a second inference backend. Those are later checkpoints if the measurements justify them.
+P3 measured default FCFS and native `--scheduling-policy priority` on the same P2 mixed workload. It does not implement a ServeScope scheduler, admission control, a background concurrency controller, a frontend, or a second inference backend. Those remain later checkpoints only if the remaining gap justifies them.

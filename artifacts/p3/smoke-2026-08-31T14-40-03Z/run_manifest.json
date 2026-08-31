@@ -1,0 +1,83 @@
+{
+  "suite_id": "smoke-2026-08-31T14-40-03Z",
+  "git": {
+    "commit": "a96546ab2e02cedcbea7d407b3af5dd7a15611f4",
+    "dirty": true,
+    "branch": "p3-native-priority"
+  },
+  "source_hashes": {
+    "scripts/p3_native_priority.py": "6975f1a38a599436c54f4e584be7cd26b0f794dce8145556b0a1d8b0779c2b2d",
+    "scripts/p2_mixed.py": "304bffea81e9947ee5dfb0ee0201947538e97314f4581d6f71f67e8d0743a60b",
+    "servescope/p3_metrics.py": "1489a6991cd26736541e95bba6912540aacea5747041e9797f531b0823f0cee1",
+    "servescope/p2_metrics.py": "075031fca19a2062998d9da06e6ca60ee17a7f72ec48a5ca1f8cc634f32d665a",
+    "servescope/client.py": "1a6c17b1dc3cd0e72e395fc2eb8bb6dd71eef3fdba0b118466bfa0f45a2d5d21",
+    "servescope/metrics.py": "e73bad2a657a86aef383f917a24d60ffb24180c36e3ea02ddae5da43bb21dfcf",
+    "servescope/workload.py": "a56cb75c917f22484b77d68654607fbcab677a844737f28e82f1f1a077a3c65e",
+    "configs/p3_native_priority.json": "6d028aeaf8b4d719b87e1682249e6aa60561b707e2d6b4150b90bb2d4e963c71"
+  },
+  "model": "Qwen/Qwen3-1.7B",
+  "backend": "vllm",
+  "backend_version": "0.28.0",
+  "scheduler_policy": "fcfs",
+  "server_command": "vllm serve Qwen/Qwen3-1.7B --gpu-memory-utilization 0.85 --enforce-eager --enable-per-request-metrics",
+  "server_env": {
+    "VLLM_WSL2_ENABLE_PIN_MEMORY": "1",
+    "VLLM_USE_FLASHINFER_SAMPLER": "0",
+    "HF_HOME": "/home/mayur/.cache/huggingface"
+  },
+  "priority_mechanism": "OpenAI chat request-body field `priority`",
+  "priority_semantics": "lower integer is handled earlier; ties by arrival time then request id",
+  "class_priorities": {
+    "interactive": 0,
+    "background": 0
+  },
+  "class_configs": {
+    "interactive": {
+      "workload_class": "interactive",
+      "offered_rps": 64,
+      "min_tokens": 64,
+      "max_completion_tokens": 64,
+      "temperature": 0,
+      "max_inflight": 2048,
+      "client_max_connections": 2560,
+      "priority": 0
+    },
+    "background": {
+      "workload_class": "background",
+      "offered_rps": 16,
+      "pilot_rates_rps": [
+        4,
+        8,
+        16
+      ],
+      "extra_probe_rps": 32,
+      "min_tokens": 256,
+      "max_completion_tokens": 256,
+      "temperature": 0,
+      "max_inflight": 512,
+      "client_max_connections": 640,
+      "priority": 1
+    },
+    "telemetry": {
+      "client_max_connections": 8,
+      "max_inflight": 4
+    }
+  },
+  "ulimit_n_soft": 10240,
+  "ulimit_n_hard": 1048576,
+  "notes": [
+    "WSLg/Xwayland shares the GPU with the vLLM process.",
+    "vLLM is running with --enforce-eager. That is a known WSL limitation.",
+    "P3 isolates native --scheduling-policy only. No ServeScope scheduler.",
+    "Interactive and background keep separate HTTP pools. Telemetry is a third small client."
+  ],
+  "package_versions": {
+    "vllm": "0.28.0",
+    "torch": "2.13.0+cu130",
+    "httpx": "0.28.1",
+    "numpy": "2.3.5",
+    "matplotlib": "3.11.1"
+  },
+  "mode": "smoke",
+  "start_utc": "2026-08-31T14:42:07.448559+00:00"
+}
