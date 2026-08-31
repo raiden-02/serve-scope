@@ -1,0 +1,136 @@
+{
+  "suite_id": "pilot-2026-08-31T01-31-57Z",
+  "mode": "pilot",
+  "git": {
+    "commit": "459df2c1e1d8512ebe074139fd466c5e5dbba120",
+    "dirty": true,
+    "branch": "p1-saturation-harness"
+  },
+  "model": "Qwen/Qwen3-1.7B",
+  "backend": "vllm",
+  "backend_version": "0.28.0",
+  "torch_version": "2.13.0+cu130",
+  "torch_cuda_build": "13.0",
+  "gpu": "NVIDIA GeForce RTX 4080 SUPER",
+  "server_command": "vllm serve Qwen/Qwen3-1.7B --gpu-memory-utilization 0.85 --enforce-eager --enable-per-request-metrics",
+  "server_env": {
+    "VLLM_WSL2_ENABLE_PIN_MEMORY": "1",
+    "VLLM_USE_FLASHINFER_SAMPLER": "0",
+    "HF_HOME": "/home/mayur/.cache/huggingface"
+  },
+  "notes": [
+    "WSLg/Xwayland shares the GPU with the vLLM process.",
+    "vLLM is running with --enforce-eager. That is a known WSL limitation, not a tuned serving mode.",
+    "P1 timings are measured on a controlled 64-token interactive workload. They are not general chat SLOs.",
+    "prefix caching stays at the vLLM default (enabled)."
+  ],
+  "slo_p95_ttft_seconds": 1.0,
+  "percentile_method": "numpy.percentile method='linear' (R type 7)",
+  "start_utc": "2026-08-31T01:31:57.167982+00:00",
+  "end_utc": "2026-08-31T01:33:52.365213+00:00",
+  "offered_rates_rps": [
+    64.0,
+    96.0,
+    128.0,
+    160.0,
+    192.0
+  ],
+  "repeats": 1,
+  "duration_s": 20.0,
+  "pre_run_gpu": {
+    "name": "NVIDIA GeForce RTX 4080 SUPER",
+    "utilization_gpu_pct": 35.0,
+    "memory_used_mib": 15698.0,
+    "memory_total_mib": 16376.0
+  },
+  "first_tested_slo_violation_rps": 160.0,
+  "aggregates": [
+    {
+      "offered_rps": 64.0,
+      "repeats": 1,
+      "any_client_limited": false,
+      "headline_p95_ttft_s_median": 0.05903285330068681,
+      "headline_p95_ttft_s_min": 0.05903285330068681,
+      "headline_p95_ttft_s_max": 0.05903285330068681,
+      "headline_p50_ttft_s_median": 0.04428150950025156,
+      "headline_output_token_tps_median": 3915.551170040101,
+      "headline_completed_rps_median": 61.18048703187658,
+      "repeat_p95_ttft_s": [
+        0.05903285330068681
+      ],
+      "slo_p95_ttft_seconds": 1.0,
+      "slo_met_all_repeats": true
+    },
+    {
+      "offered_rps": 96.0,
+      "repeats": 1,
+      "any_client_limited": false,
+      "headline_p95_ttft_s_median": 0.05426778779965389,
+      "headline_p95_ttft_s_min": 0.05426778779965389,
+      "headline_p95_ttft_s_max": 0.05426778779965389,
+      "headline_p50_ttft_s_median": 0.043943982499968115,
+      "headline_output_token_tps_median": 5882.880757205415,
+      "headline_completed_rps_median": 91.9200118313346,
+      "repeat_p95_ttft_s": [
+        0.05426778779965389
+      ],
+      "slo_p95_ttft_seconds": 1.0,
+      "slo_met_all_repeats": true
+    },
+    {
+      "offered_rps": 128.0,
+      "repeats": 1,
+      "any_client_limited": false,
+      "headline_p95_ttft_s_median": 0.0771701628995288,
+      "headline_p95_ttft_s_min": 0.0771701628995288,
+      "headline_p95_ttft_s_max": 0.0771701628995288,
+      "headline_p50_ttft_s_median": 0.06445030849954492,
+      "headline_output_token_tps_median": 7800.404181065876,
+      "headline_completed_rps_median": 121.88131532915432,
+      "repeat_p95_ttft_s": [
+        0.0771701628995288
+      ],
+      "slo_p95_ttft_seconds": 1.0,
+      "slo_met_all_repeats": true
+    },
+    {
+      "offered_rps": 160.0,
+      "repeats": 1,
+      "any_client_limited": true,
+      "headline_p95_ttft_s_median": 5.535366165999994,
+      "headline_p95_ttft_s_min": 5.535366165999994,
+      "headline_p95_ttft_s_max": 5.535366165999994,
+      "headline_p50_ttft_s_median": 0.08069584750046488,
+      "headline_output_token_tps_median": 5585.744082674374,
+      "headline_completed_rps_median": 87.2772512917871,
+      "repeat_p95_ttft_s": [
+        5.535366165999994
+      ],
+      "slo_p95_ttft_seconds": 1.0,
+      "slo_met_all_repeats": false
+    },
+    {
+      "offered_rps": 192.0,
+      "repeats": 1,
+      "any_client_limited": true,
+      "headline_p95_ttft_s_median": 0.11385388015023633,
+      "headline_p95_ttft_s_min": 0.11385388015023633,
+      "headline_p95_ttft_s_max": 0.11385388015023633,
+      "headline_p50_ttft_s_median": 0.07158677799998259,
+      "headline_output_token_tps_median": 8433.282839847505,
+      "headline_completed_rps_median": 131.77004437261726,
+      "repeat_p95_ttft_s": [
+        0.11385388015023633
+      ],
+      "slo_p95_ttft_seconds": 1.0,
+      "slo_met_all_repeats": true
+    }
+  ],
+  "package_versions": {
+    "vllm": "0.28.0",
+    "torch": "2.13.0+cu130",
+    "httpx": "0.28.1",
+    "numpy": "2.5.2",
+    "matplotlib": "3.11.1"
+  }
+}

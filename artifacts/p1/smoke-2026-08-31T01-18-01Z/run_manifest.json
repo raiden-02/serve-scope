@@ -1,0 +1,68 @@
+{
+  "suite_id": "smoke-2026-08-31T01-18-01Z",
+  "mode": "smoke",
+  "git": {
+    "commit": "459df2c1e1d8512ebe074139fd466c5e5dbba120",
+    "dirty": true,
+    "branch": "p1-saturation-harness"
+  },
+  "model": "Qwen/Qwen3-1.7B",
+  "backend": "vllm",
+  "backend_version": "0.28.0",
+  "torch_version": "2.13.0+cu130",
+  "torch_cuda_build": "13.0",
+  "gpu": "NVIDIA GeForce RTX 4080 SUPER",
+  "server_command": "vllm serve Qwen/Qwen3-1.7B --gpu-memory-utilization 0.85 --enforce-eager --enable-per-request-metrics",
+  "server_env": {
+    "VLLM_WSL2_ENABLE_PIN_MEMORY": "1",
+    "VLLM_USE_FLASHINFER_SAMPLER": "0",
+    "HF_HOME": "/home/mayur/.cache/huggingface"
+  },
+  "notes": [
+    "WSLg/Xwayland shares the GPU with the vLLM process.",
+    "vLLM is running with --enforce-eager. That is a known WSL limitation, not a tuned serving mode.",
+    "P1 timings are measured on a controlled 64-token interactive workload. They are not general chat SLOs.",
+    "prefix caching stays at the vLLM default (enabled)."
+  ],
+  "slo_p95_ttft_seconds": 1.0,
+  "percentile_method": "numpy.percentile method='linear' (R type 7)",
+  "start_utc": "2026-08-31T01:18:01.469303+00:00",
+  "end_utc": "2026-08-31T01:18:25.431835+00:00",
+  "offered_rates_rps": [
+    2.0
+  ],
+  "repeats": 1,
+  "duration_s": 8.0,
+  "pre_run_gpu": {
+    "name": "NVIDIA GeForce RTX 4080 SUPER",
+    "utilization_gpu_pct": 30.0,
+    "memory_used_mib": 15749.0,
+    "memory_total_mib": 16376.0
+  },
+  "first_tested_slo_violation_rps": null,
+  "aggregates": [
+    {
+      "offered_rps": 2.0,
+      "repeats": 1,
+      "any_client_limited": false,
+      "headline_p95_ttft_s_median": 0.04563209499997356,
+      "headline_p95_ttft_s_min": 0.04563209499997356,
+      "headline_p95_ttft_s_max": 0.04563209499997356,
+      "headline_p50_ttft_s_median": 0.03922786949988222,
+      "headline_output_token_tps_median": 122.55884175184717,
+      "headline_completed_rps_median": 1.914981902372612,
+      "repeat_p95_ttft_s": [
+        0.04563209499997356
+      ],
+      "slo_p95_ttft_seconds": 1.0,
+      "slo_met_all_repeats": true
+    }
+  ],
+  "package_versions": {
+    "vllm": "0.28.0",
+    "torch": "2.13.0+cu130",
+    "httpx": "0.28.1",
+    "numpy": "2.5.2",
+    "matplotlib": "3.11.1"
+  }
+}
