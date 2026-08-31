@@ -1,70 +1,78 @@
 # ServeScope
 
-ServeScope keeps interactive chat responsive when background AI jobs share the same GPU. Excess background work can wait outside the model server instead of making people stare at a blank reply.
+ServeScope keeps interactive LLM requests responsive when background jobs share the same GPU, by controlling how much background work enters the inference server.
 
-It is a local measurement lab on this machine's RTX 4080 SUPER, not a production serving product and not a new inference runtime. It measures first-token latency and runtime queues, compares vLLM's native priority scheduling, and adds an external backpressure gate for background work.
+![ServeScope live demo](docs/demo.png)
 
-## Problem
+It is a local measurement lab on an RTX 4080 SUPER. It is not a production serving product and not a new inference runtime.
+
+## Why I built it
 
 One GPU can serve a person waiting on a reply and longer background jobs at the same time. If the background jobs flood the server, the person stares at a blank reply for seconds.
 
-## What I built
+## What it does
 
-- A streaming measurement harness with explicit request clocks
-- Mixed interactive + background workloads on real vLLM 0.28.0
-- A fair test of vLLM's own `--scheduling-policy priority`
-- An external AIMD-style background admission gate (not a vLLM scheduler)
-- A local live lab at `http://127.0.0.1:8080`
+- Streams real chat against a local OpenAI-compatible vLLM server
+- Measures first-token latency with explicit client clocks
+- Runs mixed interactive and background workloads on vLLM 0.28.0
+- Compares vLLM's own `--scheduling-policy priority` against default FCFS
+- Holds excess background work in an external admission queue (AIMD-style concurrency limit, not a vLLM scheduler)
+- Shows the live experiment at `http://127.0.0.1:8080`
 
-## Headline results
+## Results
 
-Same-session comparisons only. Do not read these as one three-step experiment.
+Two separate benchmark sessions. They are not one four-stage latency progression.
 
-**P3, one session:** default FCFS mixed burst p95 **3.33 s** → native priority **836 ms**.
+**Native priority baseline** (`artifacts/p3/comparison-2026-08-31T16-29-56Z/result.json`)
 
-**P4, a later session:** native priority mixed burst p95 **297 ms** → ServeScope backpressure **103 ms**. Runtime waiting **83 → 0**. Background jobs sat in ServeScope's local queue (peak **137**). Background p95 total E2E **19.1 s → 26.1 s**. Output goodput **1869 → 1510 tok/s**. All 240 background jobs still finished.
+Default FCFS mixed burst p95 TTFT **3.33 s**. Native vLLM priority **836 ms**. Background work paid for it: p95 E2E about **12.8 s → 26.3 s**, output goodput about **2240 → 1583 tok/s**.
 
-The P4 run used bounded admission. The AIMD decrease path exists and is unit-tested. It was not exercised in that headline workload (`decrease_count = 0`).
+**External admission** (`artifacts/p4/comparison-2026-08-31T21-15-28Z/result.json`)
 
-P3 native (836 ms) and P4 native (297 ms) are different sessions. They are not one controlled pair.
+Native priority mixed burst p95 TTFT **297 ms**. ServeScope **103 ms**. Runtime waiting **83 → 0**. Peak local pending **137**. Background p95 total E2E **19.1 s → 26.1 s**. Output goodput **1869 → 1510 tok/s**. All 240 background jobs still finished.
 
-## How to run the demo
+The measured admission run never halved the concurrency limit (`decrease_count = 0`) because vLLM waiting stayed at zero. The improvement came from bounded admission itself. The decrease path exists and is unit-tested.
 
-Terminal 1, WSL2, from `~/serve-scope`:
+An earlier interactive-only sweep did not find a clean saturation cliff. At 128 RPS some valid repeats collapsed and others stayed near 70 ms. Details are in the notes.
+
+## Run it locally
+
+Expected setup: Windows + WSL2 Ubuntu, Python 3.12, an NVIDIA GPU with enough VRAM for `Qwen/Qwen3-1.7B` BF16, vLLM 0.28.0.
+
+```bash
+cd ~/serve-scope
+source .venv/bin/activate
+```
+
+Terminal 1 starts the priority server:
 
 ```bash
 scripts/_p3_start_priority.sh
 ```
 
-Terminal 2:
+Terminal 2 starts the lab:
 
 ```bash
-source .venv/bin/activate
 python scripts/run_demo.py
 ```
 
-Open `http://127.0.0.1:8080`.
+Open `http://127.0.0.1:8080`. If vLLM is down, the page still renders and the recorded results stay visible. Live telemetry is marked unavailable rather than filled with zeros.
 
-The page still renders if vLLM is down. It shows Disconnected / Unavailable. It does not invent telemetry.
+Live modes use the same already-running priority server:
 
-Live modes (same already-running priority server):
+- **Native vLLM:** background jobs go straight to the server at priority 1
+- **ServeScope:** the same server, but background jobs wait in a local queue first
 
-- **Native priority:** background jobs go straight to vLLM at priority 1
-- **ServeScope backpressure:** the same server, but background jobs wait in a local admission queue. Arrivals and admission overlap, so a queued job can be submitted before the last demo job arrives.
+The browser cannot change `--scheduling-policy`. Default FCFS is recorded evidence only. The on-page burst is `8 jobs/s × 5 s = 40` real requests, not a replay of the 60-second benchmark.
 
-Default FCFS is shown only as measured P3 evidence. Changing a UI toggle cannot change `--scheduling-policy` on a running server.
+```bash
+python -m pytest tests/test_p1_metrics.py tests/test_p2_metrics.py tests/test_p3_metrics.py tests/test_p4_backpressure.py tests/test_demo_state.py tests/test_demo_evidence.py tests/test_demo_app.py tests/test_demo_orchestration.py -q
+```
 
-The burst button is a short demo (`8 jobs/s × 5 s = 40 jobs`). It is not a P4 benchmark replay.
+## How it works
 
-## Screenshot
+Interactive chat (priority 0) always goes to vLLM. Background jobs (priority 1) either go there immediately or sit in ServeScope until the current concurrency limit has room. The controller watches `vllm:num_requests_waiting`. It does not cancel work already submitted.
 
-See `docs/demo.png` if present. That file is a capture of the running app, not a mockup.
+## Benchmark notes
 
-## Experiment history
-
-Clock definitions, validity rules, P0-P4 methods, and artifact paths live in [`docs/experiments.md`](docs/experiments.md).
-
-Accepted comparison files:
-
-- P3: `artifacts/p3/comparison-2026-08-31T16-29-56Z/result.json`
-- P4: `artifacts/p4/comparison-2026-08-31T21-15-28Z/result.json`
+Workload definitions, clocks, validity rules, reproduction commands, and caveats are in [`docs/experiments.md`](docs/experiments.md).

@@ -1,5 +1,6 @@
 .venv/
 .python-version
+.env
 __pycache__/
 *.py[cod]
 *.egg-info/
@@ -7,7 +8,6 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 
-# Local caches must stay off /mnt/c and out of git
 .cache/
 huggingface/
 *.safetensors
@@ -16,7 +16,6 @@ huggingface/
 *.pt
 *.onnx
 
-# Editor / OS
 .DS_Store
 Thumbs.db
 .idea/

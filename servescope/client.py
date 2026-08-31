@@ -1,4 +1,4 @@
-"""Async OpenAI-compatible streaming client for P1 measurements."""
+"""Async OpenAI-compatible streaming client."""
 
 from __future__ import annotations
 

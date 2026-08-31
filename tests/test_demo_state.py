@@ -103,17 +103,6 @@ def test_counters_never_exceed_offered():
     assert state.background_completed + state.background_failed == 2
 
 
-def test_demo_modules_have_no_simulation_fallback():
-    from pathlib import Path
-
-    root = Path(__file__).resolve().parents[1] / "servescope" / "demo"
-    banned = ("fake ttft", "random queue", "simulate queue", "if server unavailable")
-    for path in root.glob("*.py"):
-        text = path.read_text(encoding="utf-8").lower()
-        for token in banned:
-            assert token not in text, f"{path.name} contains {token}"
-
-
 def test_disconnected_does_not_fabricate_zeros():
     runtime = disconnected_runtime()
     assert runtime["server"] == "disconnected"

@@ -1,9 +1,5 @@
 #!/usr/bin/env python3
-"""P1 open-loop saturation sweep against a local vLLM server.
-
-This is a measurement harness. It is not a scheduler and it is not a benchmark
-framework for later workload classes.
-"""
+"""Open-loop saturation sweep against a local vLLM server."""
 
 from __future__ import annotations
 

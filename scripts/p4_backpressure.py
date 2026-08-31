@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""P4 adaptive background backpressure.
+"""External background admission against a native-priority vLLM server.
 
 Native vLLM priority stays on. ServeScope only gates how many background
-jobs are submitted. This is not a scheduler.
+jobs are submitted.
 """
 
 from __future__ import annotations

@@ -157,7 +157,7 @@ class DemoState:
 
 
 def disconnected_runtime() -> dict[str, Any]:
-    """Real missing telemetry. Do not fill zeros."""
+    """Missing telemetry stays None so a disconnected server does not look idle."""
     return {
         "server": "disconnected",
         "model": None,

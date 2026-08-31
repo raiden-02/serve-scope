@@ -1,4 +1,4 @@
-"""P3 native-priority comparison helpers. P1 clocks and P2 phases stay unchanged."""
+"""Native-priority comparison helpers. Request clocks and mixed-workload phases stay unchanged."""
 
 from __future__ import annotations
 
@@ -41,10 +41,10 @@ def request_priority_for_class(workload_class: str, scheduler_policy: str) -> in
 def should_send_priority_field(scheduler_policy: str) -> bool:
     """Send the request-body priority field only on the native-priority suite.
 
-    P3 FCFS intentionally omits the field so headline FCFS requests carry the
-    runtime default. Installed vLLM 0.28 accepted `priority=1` on FCFS in the
-    local smoke even though the protocol text says nonzero priority should be
-    rejected. No P3 FCFS headline request carried a priority field.
+    FCFS requests omit the field so they carry the runtime default. Installed
+    vLLM 0.28 accepted `priority=1` on FCFS in a local smoke even though the
+    protocol text says nonzero priority should be rejected. The FCFS suite
+    never sent a priority field.
     """
     return scheduler_policy == POLICY_PRIORITY
 

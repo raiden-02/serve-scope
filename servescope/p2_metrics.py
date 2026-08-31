@@ -1,4 +1,4 @@
-"""P2 mixed-workload helpers. P1 request-clock math stays in metrics.py."""
+"""Mixed-workload phases and class-specific summaries. Request-clock math stays in metrics.py."""
 
 from __future__ import annotations
 
@@ -26,7 +26,7 @@ def classify_phase(
     pre_end_s: float = 15.0,
     burst_end_s: float = 30.0,
 ) -> str:
-    """Map a time relative to scenario start onto a P2 phase.
+    """Map a time relative to scenario start onto a mixed-workload phase.
 
     Boundaries: [0, pre_end) pre, [pre_end, burst_end) burst, [burst_end, inf) recovery.
     Uses the request's scheduled or attempt time, never completion.
@@ -108,7 +108,7 @@ def summarize_phase_latencies(records: list[dict[str, Any]], *, slo_s: float = 1
 
 
 def class_schedule_summary(records: list[dict[str, Any]], offered_rps: float, duration_s: float) -> dict[str, Any]:
-    """Reuse P1 summarize_repeat / mark_repeat_validity for one workload class."""
+    """Reuse summarize_repeat / mark_repeat_validity for one workload class."""
     summary = summarize_repeat(records, offered_rps=offered_rps, duration_s=duration_s)
     return summary
 

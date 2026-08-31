@@ -1,4 +1,4 @@
-"""P1 measurement helpers: SSE parse, status, percentiles, summaries.
+"""Measurement helpers: SSE parse, status, percentiles, summaries.
 
 Percentiles use NumPy ``method='linear'`` (R type 7). That choice is fixed
 for this project so aggregates stay comparable across runs.
@@ -264,7 +264,7 @@ def mark_repeat_validity(
     """Mark whether a repeat is valid clean offered-load evidence.
 
     Invalid repeats stay in raw data and the repeat summary. They are excluded
-    from headline latency/throughput that claims to describe a clean offered load.
+    from latency/throughput that claims to describe a clean offered load.
     """
     reasons: list[str] = []
     if summary.get("aborted"):

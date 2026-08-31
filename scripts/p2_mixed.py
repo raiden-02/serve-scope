@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
-"""P2 mixed-workload interference harness.
+"""Mixed-workload interference harness.
 
 Interactive traffic stays at a healthy offered load. A timed background burst
-is injected onto the same default vLLM scheduler. This script measures. It
-does not prioritize, admit, or intervene.
+is injected onto the same default vLLM scheduler.
 """
 
 from __future__ import annotations

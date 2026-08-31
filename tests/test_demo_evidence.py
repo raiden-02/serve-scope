@@ -39,6 +39,7 @@ def test_p4_artifact_medians():
     assert p4["rows"][0]["background_p95"] == "19.11 s"
     assert p4["rows"][1]["background_p95"] == "26.08 s"
     assert "decrease" in p4["claim_note"]
+    assert p4["jobs_completed"] == 240
     assert p4["ttft_reduction_pct"] == 65
     assert reduction_pct(0.297, 0.103) == 65
     assert reduction_pct(None, 0.1) is None

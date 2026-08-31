@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""P0 streaming smoke test against a local OpenAI-compatible vLLM server.
+"""Streaming smoke test against a local OpenAI-compatible vLLM server.
 
 Timings are environment evidence only. They are not benchmark results.
 """

@@ -92,6 +92,9 @@ function renderP4(block) {
   const to = gated.background_p95 || "-";
   setText("p4-tradeoff", `Background jobs finished later: ${from} → ${to} p95`);
   setText("p4-path", block.path || "");
+  if (block.jobs_completed != null) {
+    setText("p4-jobs", `All ${block.jobs_completed} jobs still completed.`);
+  }
 }
 
 function renderP3(block) {
@@ -170,7 +173,7 @@ function applyLive(data) {
   if (data.burst_preset) {
     const p = data.burst_preset;
     $("burst-hint").textContent =
-      `${p.rps} jobs/s for ${p.duration_s} seconds · ${p.jobs} real model requests. This is a live demo burst, not a P4 benchmark replay.`;
+      `${p.rps} jobs/s for ${p.duration_s} seconds · ${p.jobs} real model requests. Shorter than the recorded 60-second mixed workload.`;
   }
 
   $("mode-native").classList.toggle("active", data.mode === "native");

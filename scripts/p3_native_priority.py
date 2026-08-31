@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
-"""P3 native vLLM priority baseline.
+"""Native vLLM priority baseline.
 
-Compares the same P2 mixed workload under FCFS and --scheduling-policy priority.
-This script does not implement a ServeScope scheduler, admission, or throttle.
+Compares the same mixed workload under FCFS and --scheduling-policy priority.
 """
 
 from __future__ import annotations

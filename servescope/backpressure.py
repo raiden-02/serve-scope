@@ -1,4 +1,4 @@
-"""AIMD background admission. This is not a vLLM scheduler."""
+"""AIMD background admission. vLLM still owns scheduling after a job is submitted."""
 
 from __future__ import annotations
 

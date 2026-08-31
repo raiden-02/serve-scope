@@ -1,7 +1,7 @@
 [project]
 name = "serve-scope"
 version = "0.0.1"
-description = "Local LLM inference lab for measuring and visualizing interactive/background interference, native priority, and external backpressure."
+description = "Local LLM inference lab for measuring interactive latency under background GPU load."
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [

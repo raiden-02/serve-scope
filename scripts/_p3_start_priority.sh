@@ -1,6 +1,6 @@
 #!/bin/bash
 set -euo pipefail
-cd /home/mayur/serve-scope
+cd "$(dirname "$0")/.."
 export PATH="$HOME/.local/gcc/usr/bin:$HOME/.local/bin:/usr/lib/wsl/lib:$PATH"
 export LD_LIBRARY_PATH="$HOME/.local/gcc/usr/lib/x86_64-linux-gnu:/usr/lib/wsl/lib"
 export LIBRARY_PATH="$HOME/.local/gcc/usr/lib/x86_64-linux-gnu"

@@ -1,4 +1,4 @@
-"""Deterministic prompts for P1 interactive and P2 background workloads."""
+"""Deterministic prompts for interactive and background workloads."""
 
 from __future__ import annotations
 

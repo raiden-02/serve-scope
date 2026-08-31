@@ -1,4 +1,4 @@
-"""Load accepted P3/P4 comparison artifacts. Never invent numbers."""
+"""Read benchmark summaries used by the demo."""
 
 from __future__ import annotations
 
@@ -8,9 +8,11 @@ from typing import Any
 
 P3_COMPARISON = Path("artifacts/p3/comparison-2026-08-31T16-29-56Z/result.json")
 P4_COMPARISON = Path("artifacts/p4/comparison-2026-08-31T21-15-28Z/result.json")
+P4_NATIVE_SUITE = Path("artifacts/p4/native-2026-08-31T21-07-52Z/result.json")
+P4_BACKPRESSURE_SUITE = Path("artifacts/p4/backpressure-2026-08-31T21-11-34Z/result.json")
 SESSION_NOTE = (
-    "Comparisons are shown within the sessions in which they were measured; "
-    "cross-session results are not treated as one controlled comparison."
+    "These were separate benchmark sessions, so they should not be read as "
+    "one four-stage latency progression."
 )
 
 
@@ -67,6 +69,26 @@ def load_json(path: Path) -> dict[str, Any] | None:
     return payload if isinstance(payload, dict) else None
 
 
+def completed_job_count(payload: dict[str, Any] | None) -> int | None:
+    """Same completed-job count across every repeat, or None if the suite disagrees."""
+    if payload is None:
+        return None
+    repeats = payload.get("repeats")
+    if not isinstance(repeats, list) or not repeats:
+        return None
+    counts: list[int] = []
+    for row in repeats:
+        if not isinstance(row, dict):
+            return None
+        raw = row.get("background_completed_count")
+        if raw is None:
+            return None
+        counts.append(int(raw))
+    if min(counts) != max(counts):
+        return None
+    return counts[0]
+
+
 def load_p3_evidence(root: Path) -> dict[str, Any]:
     path = root / P3_COMPARISON
     payload = load_json(path)
@@ -80,7 +102,7 @@ def load_p3_evidence(root: Path) -> dict[str, Any]:
         return _unavailable()
     return {
         "available": True,
-        "label": "Measured benchmark: P3",
+        "label": "Native priority baseline",
         "path": str(P3_COMPARISON).replace("\\", "/"),
         "session": "same-session FCFS vs native priority",
         "rows": [
@@ -116,18 +138,21 @@ def load_p4_evidence(root: Path) -> dict[str, Any]:
     pending = _median_block(payload, "gated_max_pending")
     if native is None or gated is None:
         return _unavailable()
+    native_jobs = completed_job_count(load_json(root / P4_NATIVE_SUITE))
+    gated_jobs = completed_job_count(load_json(root / P4_BACKPRESSURE_SUITE))
+    jobs_completed = gated_jobs if native_jobs == gated_jobs else None
     return {
         "available": True,
         "ttft_reduction_pct": reduction_pct(native["median"], gated["median"]),
-        "label": "Measured benchmark: P4",
+        "jobs_completed": jobs_completed,
+        "label": "External background admission",
         "path": str(P4_COMPARISON).replace("\\", "/"),
-        "session": "same-session native priority vs ServeScope backpressure",
+        "session": "same-session native priority vs ServeScope admission",
         "claim_note": (
-            "ServeScope added external background admission/backpressure with an "
-            "AIMD-style concurrency policy. In the measured workload, bounded "
-            "admission kept the vLLM waiting queue at zero while background jobs "
-            "waited in ServeScope's local queue. The decrease path exists and is "
-            "unit-tested, but was not exercised in this headline run."
+            "The measured backpressure run never halved the concurrency limit "
+            "because the runtime waiting queue stayed at zero. The observed "
+            "improvement came from bounded admission. The decrease path exists "
+            "and is unit-tested."
         ),
         "rows": [
             {

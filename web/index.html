@@ -89,13 +89,13 @@
       <div class="ttft">
         <span class="ttft-label">First response</span>
         <strong id="ttft-value">-</strong>
-        <span class="ttft-help" title="How long you wait before the response starts appearing.">Time to first token (TTFT). How long you wait before the response starts appearing. Not the P1 benchmark clock.</span>
+        <span class="ttft-help" title="How long you wait before the response starts appearing.">Time to first token (TTFT). How long you wait before the response starts appearing.</span>
       </div>
     </article>
 
     <article class="card work-card">
       <h2>Background AI work</h2>
-      <p class="caption" id="burst-hint">8 jobs/s for 5 seconds · 40 real model requests. This is a live demo burst, not a P4 benchmark replay.</p>
+      <p class="caption" id="burst-hint">8 jobs/s for 5 seconds · 40 real model requests. Shorter than the recorded 60-second mixed workload.</p>
 
       <fieldset class="modes">
         <legend>Background handling</legend>
@@ -158,7 +158,7 @@
 
   <section class="evidence" aria-labelledby="evidence-heading">
     <h2 id="evidence-heading">What happened in the measured workload?</h2>
-    <p class="caption" id="p4-meta">Measured benchmark · P4 · same-session comparison</p>
+    <p class="caption" id="p4-meta">Measured on this machine · same-session comparison</p>
     <p class="caption" id="evidence-note"></p>
     <p id="p4-unavailable" class="status" hidden>Evidence unavailable</p>
 
@@ -184,13 +184,13 @@
     <aside class="tradeoff">
       <h3>The trade-off</h3>
       <p id="p4-tradeoff">Background jobs finished later.</p>
-      <p>All 240 jobs still completed.</p>
+      <p id="p4-jobs"></p>
     </aside>
   </section>
 
   <section class="card secondary-evidence">
     <h2>Why not just use the runtime's built-in priority?</h2>
-    <p class="caption" id="p3-meta">Measured benchmark · P3 · a different session from P4</p>
+    <p class="caption" id="p3-meta">Measured on this machine · a different session from the comparison above</p>
     <div class="compare compare-small" id="p3-compare">
       <article>
         <h3>Default FCFS</h3>
@@ -219,11 +219,11 @@
       <div><dt>Controller action</dt><dd id="hood-action">-</dd></div>
       <div><dt>Runtime</dt><dd>vLLM 0.28.0, native priority 0 interactive / 1 background</dd></div>
     </dl>
-    <p class="caption">Interactive requests never go through the ServeScope gate. The browser cannot change <code>--scheduling-policy</code> on the running server. Default FCFS is artifact-backed P3 evidence only.</p>
+    <p class="caption">Interactive requests never go through the ServeScope gate. The browser cannot change <code>--scheduling-policy</code> on the running server. Default FCFS is recorded evidence only.</p>
   </details>
 
   <footer>
-    <p>Live values come from this machine's vLLM server and nvidia-smi. Historical numbers come from accepted benchmark artifacts.</p>
+    <p>Live values come from this machine's vLLM server and nvidia-smi. Historical numbers come from recorded benchmark artifacts.</p>
   </footer>
   <script src="/app.js"></script>
 </body>
