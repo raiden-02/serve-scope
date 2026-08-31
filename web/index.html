@@ -3,107 +3,227 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>ServeScope: Interactive LLM Inference Lab</title>
+  <title>ServeScope: keep chat responsive while the GPU is busy</title>
   <link rel="stylesheet" href="/styles.css">
 </head>
-<body>
-  <header class="top">
+<body class="server-offline mode-native burst-idle">
+  <header class="site">
     <div>
-      <h1>ServeScope</h1>
-      <p class="tag">Interactive LLM inference lab</p>
+      <p class="brand">ServeScope</p>
+      <p class="brand-sub">Interactive LLM inference lab</p>
     </div>
-    <div id="server-pill" class="pill disconnected">Checking server</div>
+    <ul class="live-pills" aria-label="Live environment">
+      <li><span class="dot" id="live-dot" aria-hidden="true"></span><span id="live-status">Checking</span></li>
+      <li id="live-gpu">GPU unknown</li>
+      <li id="live-model">Model unknown</li>
+    </ul>
   </header>
 
-  <p class="lede">
-    One GPU is serving interactive chat and background jobs.
-    Background work can make a user wait longer for the first word.
-    This page talks to a real local vLLM server.
-  </p>
-
-  <section class="runtime-bar" id="runtime-bar">
-    <div><span class="k">Model</span> <span id="model">-</span></div>
-    <div><span class="k">GPU</span> <span id="gpu-name">-</span></div>
-    <div><span class="k">GPU util</span> <span id="gpu-util">-</span></div>
-    <div><span class="k">VRAM</span> <span id="vram">-</span></div>
-    <div><span class="k">vLLM running</span> <span id="vllm-running">-</span></div>
-    <div><span class="k">vLLM waiting</span> <span id="vllm-waiting">-</span></div>
+  <section class="hero">
+    <h1>Keep chat responsive<br> while the GPU is busy.</h1>
+    <p class="lede">
+      Interactive requests and background AI jobs share this GPU.
+      Add background work and watch where requests wait.
+    </p>
   </section>
 
-  <section class="grid">
-    <article class="panel">
-      <h2>Live chat</h2>
-      <p class="hint">Interactive request, priority 0. Live UI TTFT is from Send until the first text reaches this page. That is not the P1 benchmark clock.</p>
+  <div id="offline-banner" class="banner" hidden>
+    <strong>Model server offline</strong>
+    <p>Start the local vLLM server to use the live experiment. Measured benchmark results below are still available.</p>
+  </div>
+
+  <section class="flow-wrap" aria-labelledby="flow-heading">
+    <h2 id="flow-heading" class="visually-hidden">How work reaches the GPU</h2>
+    <div class="flow" id="flow">
+      <div class="lane">
+        <span class="lane-label">You</span>
+        <span class="rail" aria-hidden="true"></span>
+        <div class="node">
+          <span>Shared GPU</span>
+          <strong id="flow-you-note">Interactive, not gated</strong>
+        </div>
+      </div>
+      <div class="lane lane-native">
+        <span class="lane-label">Background</span>
+        <span class="rail" aria-hidden="true"></span>
+        <div class="node">
+          <span>Shared GPU</span>
+          <strong id="flow-native-wait">0 waiting inside server</strong>
+        </div>
+      </div>
+      <div class="lane lane-ss">
+        <span class="lane-label">Background</span>
+        <span class="rail" aria-hidden="true"></span>
+        <div class="node node-hold">
+          <span>ServeScope</span>
+          <strong id="flow-held">0</strong>
+          <small>jobs waiting here · local pending</small>
+        </div>
+        <span class="rail" aria-hidden="true"></span>
+        <div class="node">
+          <span>Shared GPU</span>
+          <strong id="flow-ss-wait">0</strong>
+          <small>waiting inside model server · vLLM waiting</small>
+        </div>
+      </div>
+    </div>
+    <p class="caption" id="flow-caption">Native vLLM sends background jobs straight to the model server.</p>
+  </section>
+
+  <section class="experiment" aria-label="Live experiment">
+    <article class="card chat-card">
+      <h2>Try the model</h2>
+      <p class="caption">Talk to the same GPU that background jobs use.</p>
       <form id="chat-form">
-        <textarea id="prompt" rows="3">In one short paragraph, why can tail latency matter more than mean?</textarea>
-        <div class="row">
+        <label class="visually-hidden" for="prompt">Prompt</label>
+        <div class="composer">
+          <textarea id="prompt" rows="2" maxlength="4000">In one short paragraph, why can tail latency matter more than mean?</textarea>
           <button type="button" id="send">Send</button>
-          <span id="ttft">Live UI TTFT: -</span>
         </div>
       </form>
-      <pre id="reply" class="reply"></pre>
-      <p id="chat-status" class="status"></p>
+      <div class="reply-box" aria-live="polite">
+        <p class="reply-kicker">Reply</p>
+        <pre id="reply" class="reply"></pre>
+        <p id="chat-status" class="status"></p>
+      </div>
+      <div class="ttft">
+        <span class="ttft-label">First response</span>
+        <strong id="ttft-value">-</strong>
+        <span class="ttft-help" title="How long you wait before the response starts appearing.">Time to first token (TTFT). How long you wait before the response starts appearing. Not the P1 benchmark clock.</span>
+      </div>
     </article>
 
-    <article class="panel">
-      <h2>Background work</h2>
-      <p class="hint" id="burst-hint">Demo burst: 8 jobs/s × 5 s = 40 jobs. These are real model requests, not a P4 benchmark.</p>
-      <div class="mode-row">
-        <button type="button" class="mode" data-mode="native" id="mode-native">Native priority</button>
-        <button type="button" class="mode" data-mode="backpressure" id="mode-backpressure">ServeScope backpressure</button>
+    <article class="card work-card">
+      <h2>Background AI work</h2>
+      <p class="caption" id="burst-hint">8 jobs/s for 5 seconds · 40 real model requests. This is a live demo burst, not a P4 benchmark replay.</p>
+
+      <fieldset class="modes">
+        <legend>Background handling</legend>
+        <button type="button" class="mode" id="mode-native">
+          <span class="mode-title">Native vLLM</span>
+          <span class="mode-desc">Send jobs directly to the model server</span>
+          <span class="mode-tech">Native priority</span>
+        </button>
+        <button type="button" class="mode" id="mode-backpressure">
+          <span class="mode-title">ServeScope</span>
+          <span class="mode-desc">Hold excess background jobs outside the server</span>
+          <span class="mode-tech">ServeScope backpressure</span>
+        </button>
+      </fieldset>
+
+      <button type="button" id="burst" class="primary">Add background work</button>
+      <p class="burst-state" aria-live="polite">Status: <strong id="burst-state">Ready</strong></p>
+
+      <div class="progress" aria-label="Background job progress">
+        <div class="progress-track"><div class="progress-fill" id="progress-fill"></div></div>
+        <p id="progress-label">0 / 0 finished</p>
       </div>
-      <p class="hint">Both modes use the same already-running priority vLLM server. The browser cannot change <code>--scheduling-policy</code>.</p>
-      <button type="button" id="burst">Inject background burst</button>
-      <p>Burst state: <strong id="burst-state">idle</strong></p>
-      <dl class="counts">
+
+      <ul class="story-counts">
+        <li>
+          <span>Held by ServeScope</span>
+          <strong id="queue-local">0</strong>
+          <small>local pending</small>
+        </li>
+        <li>
+          <span>Currently in flight</span>
+          <strong id="bg-running">0</strong>
+          <small>submitted, not finished</small>
+        </li>
+        <li>
+          <span>Waiting inside model server</span>
+          <strong id="queue-runtime">-</strong>
+          <small>vLLM waiting</small>
+        </li>
+      </ul>
+      <p id="admission-line" class="caption">Background jobs allowed in: - <span class="tech">(concurrency limit)</span></p>
+      <dl class="mini-counts">
         <div><dt>Offered</dt><dd id="bg-offered">0</dd></div>
         <div><dt>Admitted</dt><dd id="bg-admitted">0</dd></div>
-        <div><dt>In flight</dt><dd id="bg-running">0</dd></div>
-        <div><dt>Deferred</dt><dd id="bg-pending">0</dd></div>
         <div><dt>Completed</dt><dd id="bg-completed">0</dd></div>
         <div><dt>Failed</dt><dd id="bg-failed">0</dd></div>
       </dl>
-      <div class="queue-compare">
-        <div>
-          <span class="k">Runtime queue</span>
-          <strong id="queue-runtime">-</strong>
-          <span class="tiny">requests queued inside vLLM</span>
-        </div>
-        <div>
-          <span class="k">Deferred outside</span>
-          <strong id="queue-local">-</strong>
-          <span class="tiny">background jobs ServeScope has not submitted yet</span>
-        </div>
-      </div>
-      <p id="admission-line">Background cap: - · last action: -</p>
     </article>
   </section>
 
-  <section class="panel">
-    <h2>Last minute</h2>
-    <p class="hint">vLLM waiting vs ServeScope deferred. Work that leaves the runtime queue is still here if it was deferred.</p>
+  <section class="card chart-card">
+    <h2>Where is work waiting?</h2>
+    <p class="caption">ServeScope does not make background work disappear. It can move excess waiting outside the model server so interactive requests have room.</p>
+    <ul class="legend">
+      <li><span class="swatch swatch-server"></span>Inside vLLM</li>
+      <li><span class="swatch swatch-held"></span>Held by ServeScope</li>
+    </ul>
     <canvas id="chart" width="900" height="180"></canvas>
   </section>
 
-  <section class="panel evidence">
-    <h2>Measured evidence</h2>
-    <p class="hint" id="evidence-note"></p>
-    <div class="evidence-grid">
+  <section class="evidence" aria-labelledby="evidence-heading">
+    <h2 id="evidence-heading">What happened in the measured workload?</h2>
+    <p class="caption" id="p4-meta">Measured benchmark · P4 · same-session comparison</p>
+    <p class="caption" id="evidence-note"></p>
+    <p id="p4-unavailable" class="status" hidden>Evidence unavailable</p>
+
+    <div class="compare" id="p4-compare">
       <article>
-        <h3 id="p3-title">Measured benchmark: P3</h3>
-        <p id="p3-body"></p>
-        <p class="path" id="p3-path"></p>
+        <h3>Native vLLM</h3>
+        <p class="big" id="p4-native-ttft">-</p>
+        <p>first-token p95</p>
+        <p class="big sub" id="p4-native-wait">-</p>
+        <p>waiting inside vLLM</p>
       </article>
-      <article>
-        <h3 id="p4-title">Measured benchmark: P4</h3>
-        <p id="p4-body"></p>
-        <p class="path" id="p4-path"></p>
+      <article class="compare-win">
+        <h3>With ServeScope</h3>
+        <p class="big" id="p4-ss-ttft">-</p>
+        <p>first-token p95</p>
+        <p class="big sub" id="p4-ss-wait">-</p>
+        <p>waiting inside vLLM</p>
       </article>
     </div>
+    <p class="reduction" id="p4-reduction"></p>
+    <p class="path" id="p4-path"></p>
+
+    <aside class="tradeoff">
+      <h3>The trade-off</h3>
+      <p id="p4-tradeoff">Background jobs finished later.</p>
+      <p>All 240 jobs still completed.</p>
+    </aside>
   </section>
 
+  <section class="card secondary-evidence">
+    <h2>Why not just use the runtime's built-in priority?</h2>
+    <p class="caption" id="p3-meta">Measured benchmark · P3 · a different session from P4</p>
+    <div class="compare compare-small" id="p3-compare">
+      <article>
+        <h3>Default FCFS</h3>
+        <p class="big" id="p3-fcfs">-</p>
+      </article>
+      <article>
+        <h3>Native vLLM priority</h3>
+        <p class="big" id="p3-native">-</p>
+      </article>
+    </div>
+    <p class="caption">Native priority already helped substantially. ServeScope was built only after measuring what remained.</p>
+    <p class="path" id="p3-path"></p>
+    <p id="p3-unavailable" class="status" hidden>Evidence unavailable</p>
+  </section>
+
+  <details class="hood">
+    <summary>Under the hood</summary>
+    <dl>
+      <div><dt>Model</dt><dd id="model">-</dd></div>
+      <div><dt>GPU</dt><dd id="gpu-name">-</dd></div>
+      <div><dt>GPU utilization</dt><dd id="gpu-util">-</dd></div>
+      <div><dt>VRAM</dt><dd id="vram">-</dd></div>
+      <div><dt>vLLM running</dt><dd id="vllm-running">-</dd></div>
+      <div><dt>vLLM waiting</dt><dd id="vllm-waiting">-</dd></div>
+      <div><dt>Background jobs allowed in</dt><dd id="hood-cap">-</dd></div>
+      <div><dt>Controller action</dt><dd id="hood-action">-</dd></div>
+      <div><dt>Runtime</dt><dd>vLLM 0.28.0, native priority 0 interactive / 1 background</dd></div>
+    </dl>
+    <p class="caption">Interactive requests never go through the ServeScope gate. The browser cannot change <code>--scheduling-policy</code> on the running server. Default FCFS is artifact-backed P3 evidence only.</p>
+  </details>
+
   <footer>
-    <p>TTFT: time until the first generated text appears. Runtime waiting: requests queued inside vLLM. Deferred: jobs held by ServeScope. Background cap: max admitted background jobs currently allowed.</p>
+    <p>Live values come from this machine's vLLM server and nvidia-smi. Historical numbers come from accepted benchmark artifacts.</p>
   </footer>
   <script src="/app.js"></script>
 </body>

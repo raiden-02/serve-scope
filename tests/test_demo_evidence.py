@@ -10,6 +10,7 @@ from servescope.demo.evidence import (
     load_evidence,
     load_p3_evidence,
     load_p4_evidence,
+    reduction_pct,
 )
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -38,6 +39,9 @@ def test_p4_artifact_medians():
     assert p4["rows"][0]["background_p95"] == "19.11 s"
     assert p4["rows"][1]["background_p95"] == "26.08 s"
     assert "decrease" in p4["claim_note"]
+    assert p4["ttft_reduction_pct"] == 65
+    assert reduction_pct(0.297, 0.103) == 65
+    assert reduction_pct(None, 0.1) is None
 
 
 def test_missing_evidence():

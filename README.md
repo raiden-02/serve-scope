@@ -1,8 +1,8 @@
 # ServeScope
 
-ServeScope is a local LLM inference lab for seeing what happens when interactive users and background AI jobs share one GPU. It measures first-token latency and runtime queues, compares vLLM's native priority scheduling, and adds an external backpressure gate for background work.
+ServeScope keeps interactive chat responsive when background AI jobs share the same GPU. Excess background work can wait outside the model server instead of making people stare at a blank reply.
 
-It runs a real OpenAI-compatible vLLM server on this machine's RTX 4080 SUPER. It is a measurement lab, not a production serving product and not a new inference runtime.
+It is a local measurement lab on this machine's RTX 4080 SUPER, not a production serving product and not a new inference runtime. It measures first-token latency and runtime queues, compares vLLM's native priority scheduling, and adds an external backpressure gate for background work.
 
 ## Problem
 

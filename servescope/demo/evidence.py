@@ -44,6 +44,15 @@ def format_count(value: float | None) -> str | None:
     return f"{value:.1f}"
 
 
+def reduction_pct(before: float | None, after: float | None) -> int | None:
+    if before is None or after is None:
+        return None
+    start = float(before)
+    if start <= 0:
+        return None
+    return int(round((start - float(after)) / start * 100))
+
+
 def _unavailable() -> dict[str, Any]:
     return {"available": False, "message": "Evidence unavailable"}
 
@@ -109,6 +118,7 @@ def load_p4_evidence(root: Path) -> dict[str, Any]:
         return _unavailable()
     return {
         "available": True,
+        "ttft_reduction_pct": reduction_pct(native["median"], gated["median"]),
         "label": "Measured benchmark: P4",
         "path": str(P4_COMPARISON).replace("\\", "/"),
         "session": "same-session native priority vs ServeScope backpressure",
