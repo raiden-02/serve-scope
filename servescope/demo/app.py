@@ -20,6 +20,7 @@ from servescope.backpressure import AimdController
 from servescope.client import build_chat_payload
 from servescope.demo.evidence import load_evidence
 from servescope.demo.state import (
+    ACTIVE_BURST,
     MODE_BACKPRESSURE,
     BurstBusy,
     DemoState,
@@ -79,19 +80,37 @@ class DemoApp:
     def __init__(self, config: dict[str, Any]) -> None:
         self.config = config
         self.state = DemoState()
-        ctl = config["controller"]
-        self.controller = AimdController(
-            initial=int(ctl["initial_background_limit"]),
-            minimum=int(ctl["minimum_background_limit"]),
-            maximum=int(ctl["maximum_background_limit"]),
-            increase_after_zero_samples=int(ctl["increase_after_zero_samples"]),
-        )
+        self.controller = self._new_controller()
         self.state.controller_limit = self.controller.limit
         self.lock = asyncio.Lock()
         self.client = httpx.AsyncClient(timeout=httpx.Timeout(float(config["request_timeout_s"])))
         self.runtime = disconnected_runtime()
         self.started_at = time.monotonic()
         self.burst_task: asyncio.Task | None = None
+        self._burst_jobs: set[asyncio.Task] = set()
+
+    def _new_controller(self) -> AimdController:
+        ctl = self.config["controller"]
+        return AimdController(
+            initial=int(ctl["initial_background_limit"]),
+            minimum=int(ctl["minimum_background_limit"]),
+            maximum=int(ctl["maximum_background_limit"]),
+            increase_after_zero_samples=int(ctl["increase_after_zero_samples"]),
+        )
+
+    def reset_controller(self) -> None:
+        self.controller = self._new_controller()
+        self.state.controller_limit = self.controller.limit
+        self.state.controller_action = "hold"
+
+    def apply_controller_sample(self, waiting: float | None) -> None:
+        if self.state.mode != MODE_BACKPRESSURE:
+            return
+        if self.state.burst_state not in ACTIVE_BURST:
+            return
+        action = self.controller.observe(waiting)
+        self.state.controller_limit = self.controller.limit
+        self.state.controller_action = action
 
     @property
     def chat_url(self) -> str:
@@ -134,10 +153,7 @@ class DemoApp:
             waiting=waiting,
         )
         async with self.lock:
-            if self.state.mode == MODE_BACKPRESSURE:
-                action = self.controller.observe(waiting)
-                self.state.controller_limit = self.controller.limit
-                self.state.controller_action = action
+            self.apply_controller_sample(waiting)
             self.state.record_sample(time.monotonic() - self.started_at, waiting)
 
     async def telemetry_loop(self) -> None:
@@ -192,6 +208,12 @@ class DemoApp:
                         }
                     yield {"type": "token", "text": delta.get("content")}
 
+    def _track_job(self, coro) -> asyncio.Task:
+        task = asyncio.create_task(coro)
+        self._burst_jobs.add(task)
+        task.add_done_callback(self._burst_jobs.discard)
+        return task
+
     async def run_background_job(self, index: int) -> None:
         _prompt_id, prompt = select_background_prompt(int(self.config["seed"]), index)
         ok = False
@@ -204,12 +226,16 @@ class DemoApp:
             ):
                 pass
             ok = True
+        except asyncio.CancelledError:
+            async with self.lock:
+                self.state.finish_one(ok=False)
+            raise
         except Exception:
             ok = False
         async with self.lock:
             self.state.finish_one(ok=ok)
 
-    async def run_burst(self) -> None:
+    async def inject_background_arrivals(self) -> None:
         rps = float(self.config["burst_rps"])
         n = self.burst_jobs
         t0 = time.perf_counter()
@@ -222,23 +248,65 @@ class DemoApp:
                 started = self.state.offer_one()
                 native = self.state.mode != MODE_BACKPRESSURE
             if started and native:
-                asyncio.create_task(self.run_background_job(i))
-        async with self.lock:
-            self.state.mark_inject_finished()
+                self._track_job(self.run_background_job(i))
+
+    async def admit_background_while_active(self) -> None:
         while True:
+            launched: list[int] = []
             async with self.lock:
-                if self.state.mode == MODE_BACKPRESSURE:
-                    while self.state.can_admit():
-                        if not self.state.admit_one():
-                            break
-                        index = self.state.background_admitted - 1
-                        asyncio.create_task(self.run_background_job(index))
-                done = self.state.burst_state not in ("injecting", "draining")
+                while self.state.can_admit():
+                    if not self.state.admit_one():
+                        break
+                    launched.append(self.state.background_admitted - 1)
+                done = self.state.burst_state not in ACTIVE_BURST
+            for index in launched:
+                self._track_job(self.run_background_job(index))
             if done:
                 break
             await asyncio.sleep(0.02)
 
+    async def _wait_until_burst_settled(self) -> None:
+        while True:
+            async with self.lock:
+                if self.state.burst_state not in ACTIVE_BURST:
+                    return
+            await asyncio.sleep(0.02)
+
+    async def run_burst(self) -> None:
+        async with self.lock:
+            if self.state.mode == MODE_BACKPRESSURE:
+                self.reset_controller()
+        ingress = asyncio.create_task(self.inject_background_arrivals())
+        admission = None
+        try:
+            if self.state.mode == MODE_BACKPRESSURE:
+                admission = asyncio.create_task(self.admit_background_while_active())
+            await ingress
+            async with self.lock:
+                self.state.mark_inject_finished()
+            if admission is not None:
+                await admission
+            else:
+                await self._wait_until_burst_settled()
+            if self._burst_jobs:
+                await asyncio.gather(*self._burst_jobs, return_exceptions=True)
+        finally:
+            if admission is not None and not admission.done():
+                admission.cancel()
+            if not ingress.done():
+                ingress.cancel()
+
+    async def _cancel_burst_jobs(self) -> None:
+        for task in list(self._burst_jobs):
+            task.cancel()
+        if self._burst_jobs:
+            await asyncio.gather(*self._burst_jobs, return_exceptions=True)
+        self._burst_jobs.clear()
+
     async def close(self) -> None:
+        if self.burst_task is not None and not self.burst_task.done():
+            self.burst_task.cancel()
+        await self._cancel_burst_jobs()
         await self.client.aclose()
 
 

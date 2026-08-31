@@ -50,7 +50,7 @@ The page still renders if vLLM is down. It shows Disconnected / Unavailable. It 
 Live modes (same already-running priority server):
 
 - **Native priority:** background jobs go straight to vLLM at priority 1
-- **ServeScope backpressure:** the same server, but background jobs wait in a local admission queue
+- **ServeScope backpressure:** the same server, but background jobs wait in a local admission queue. Arrivals and admission overlap, so a queued job can be submitted before the last demo job arrives.
 
 Default FCFS is shown only as measured P3 evidence. Changing a UI toggle cannot change `--scheduling-policy` on a running server.
 
