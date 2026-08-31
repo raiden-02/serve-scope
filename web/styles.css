@@ -1,0 +1,88 @@
+:root {
+  --bg: #f4f1ea;
+  --ink: #1c1b18;
+  --muted: #5c574e;
+  --line: #c9c2b3;
+  --panel: #fffdf8;
+  --ok: #1f6b3a;
+  --bad: #8a2b1e;
+  --accent: #2b4c7e;
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0 auto;
+  max-width: 1100px;
+  padding: 24px 20px 48px;
+  font: 15px/1.45 "Segoe UI", system-ui, sans-serif;
+  color: var(--ink);
+  background: var(--bg);
+}
+h1, h2, h3 { margin: 0 0 8px; font-weight: 650; }
+h1 { font-size: 28px; letter-spacing: -0.02em; }
+h2 { font-size: 16px; }
+.tag, .hint, .tiny, .status, .path, footer { color: var(--muted); }
+.lede { max-width: 70ch; }
+.top, .row, .mode-row, .runtime-bar, .grid, .counts, .queue-compare, .evidence-grid {
+  display: flex;
+  gap: 16px;
+}
+.top { justify-content: space-between; align-items: flex-start; }
+.runtime-bar {
+  flex-wrap: wrap;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+}
+.runtime-bar .k, .queue-compare .k { display: block; font-size: 12px; color: var(--muted); }
+.grid { align-items: stretch; }
+.grid > .panel { flex: 1; min-width: 0; }
+.panel {
+  padding: 16px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  margin: 16px 0;
+}
+button {
+  border: 1px solid var(--ink);
+  background: var(--ink);
+  color: #fff;
+  padding: 8px 12px;
+  font: inherit;
+  cursor: pointer;
+}
+button:disabled { opacity: 0.45; cursor: not-allowed; }
+button.mode { background: transparent; color: var(--ink); }
+button.mode.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+textarea, .reply {
+  width: 100%;
+  border: 1px solid var(--line);
+  background: #fff;
+  color: inherit;
+  font: inherit;
+  padding: 8px;
+}
+.reply {
+  min-height: 140px;
+  white-space: pre-wrap;
+  overflow: auto;
+}
+.counts { flex-wrap: wrap; }
+.counts div { min-width: 90px; }
+.counts dt { font-size: 12px; color: var(--muted); }
+.counts dd { margin: 0; font-size: 22px; }
+.queue-compare { margin-top: 12px; }
+.queue-compare strong { display: block; font-size: 28px; }
+.pill {
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  font-size: 13px;
+}
+.pill.connected { border-color: var(--ok); color: var(--ok); }
+.pill.disconnected { border-color: var(--bad); color: var(--bad); }
+canvas { width: 100%; height: 180px; background: #fff; border: 1px solid var(--line); }
+.evidence-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.path { font-size: 12px; word-break: break-all; }
+@media (max-width: 800px) {
+  .grid, .evidence-grid, .top { display: block; }
+}

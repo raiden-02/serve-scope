@@ -1,0 +1,22 @@
+{
+  "model": "Qwen/Qwen3-1.7B",
+  "base_url": "http://127.0.0.1:8000",
+  "chat_path": "/v1/chat/completions",
+  "metrics_path": "/metrics",
+  "demo_host": "127.0.0.1",
+  "demo_port": 8080,
+  "seed": 20260830,
+  "chat_max_tokens": 64,
+  "background_min_tokens": 64,
+  "background_max_tokens": 64,
+  "burst_rps": 8,
+  "burst_duration_s": 5,
+  "request_timeout_s": 180,
+  "telemetry_interval_s": 0.5,
+  "controller": {
+    "initial_background_limit": 32,
+    "minimum_background_limit": 1,
+    "maximum_background_limit": 256,
+    "increase_after_zero_samples": 4
+  }
+}

@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ServeScope: Interactive LLM Inference Lab</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="top">
+    <div>
+      <h1>ServeScope</h1>
+      <p class="tag">Interactive LLM inference lab</p>
+    </div>
+    <div id="server-pill" class="pill disconnected">Checking server</div>
+  </header>
+
+  <p class="lede">
+    One GPU is serving interactive chat and background jobs.
+    Background work can make a user wait longer for the first word.
+    This page talks to a real local vLLM server.
+  </p>
+
+  <section class="runtime-bar" id="runtime-bar">
+    <div><span class="k">Model</span> <span id="model">-</span></div>
+    <div><span class="k">GPU</span> <span id="gpu-name">-</span></div>
+    <div><span class="k">GPU util</span> <span id="gpu-util">-</span></div>
+    <div><span class="k">VRAM</span> <span id="vram">-</span></div>
+    <div><span class="k">vLLM running</span> <span id="vllm-running">-</span></div>
+    <div><span class="k">vLLM waiting</span> <span id="vllm-waiting">-</span></div>
+  </section>
+
+  <section class="grid">
+    <article class="panel">
+      <h2>Live chat</h2>
+      <p class="hint">Interactive request, priority 0. Live UI TTFT is from Send until the first text reaches this page. That is not the P1 benchmark clock.</p>
+      <form id="chat-form">
+        <textarea id="prompt" rows="3">In one short paragraph, why can tail latency matter more than mean?</textarea>
+        <div class="row">
+          <button type="button" id="send">Send</button>
+          <span id="ttft">Live UI TTFT: -</span>
+        </div>
+      </form>
+      <pre id="reply" class="reply"></pre>
+      <p id="chat-status" class="status"></p>
+    </article>
+
+    <article class="panel">
+      <h2>Background work</h2>
+      <p class="hint" id="burst-hint">Demo burst: 8 jobs/s × 5 s = 40 jobs. These are real model requests, not a P4 benchmark.</p>
+      <div class="mode-row">
+        <button type="button" class="mode" data-mode="native" id="mode-native">Native priority</button>
+        <button type="button" class="mode" data-mode="backpressure" id="mode-backpressure">ServeScope backpressure</button>
+      </div>
+      <p class="hint">Both modes use the same already-running priority vLLM server. The browser cannot change <code>--scheduling-policy</code>.</p>
+      <button type="button" id="burst">Inject background burst</button>
+      <p>Burst state: <strong id="burst-state">idle</strong></p>
+      <dl class="counts">
+        <div><dt>Offered</dt><dd id="bg-offered">0</dd></div>
+        <div><dt>Admitted</dt><dd id="bg-admitted">0</dd></div>
+        <div><dt>Running</dt><dd id="bg-running">0</dd></div>
+        <div><dt>Deferred</dt><dd id="bg-pending">0</dd></div>
+        <div><dt>Completed</dt><dd id="bg-completed">0</dd></div>
+        <div><dt>Failed</dt><dd id="bg-failed">0</dd></div>
+      </dl>
+      <div class="queue-compare">
+        <div>
+          <span class="k">Runtime queue</span>
+          <strong id="queue-runtime">-</strong>
+          <span class="tiny">requests queued inside vLLM</span>
+        </div>
+        <div>
+          <span class="k">Deferred outside</span>
+          <strong id="queue-local">-</strong>
+          <span class="tiny">background jobs ServeScope has not submitted yet</span>
+        </div>
+      </div>
+      <p id="admission-line">Background cap: - · last action: -</p>
+    </article>
+  </section>
+
+  <section class="panel">
+    <h2>Last minute</h2>
+    <p class="hint">vLLM waiting vs ServeScope deferred. Work that leaves the runtime queue is still here if it was deferred.</p>
+    <canvas id="chart" width="900" height="180"></canvas>
+  </section>
+
+  <section class="panel evidence">
+    <h2>Measured evidence</h2>
+    <p class="hint" id="evidence-note"></p>
+    <div class="evidence-grid">
+      <article>
+        <h3 id="p3-title">Measured benchmark: P3</h3>
+        <p id="p3-body"></p>
+        <p class="path" id="p3-path"></p>
+      </article>
+      <article>
+        <h3 id="p4-title">Measured benchmark: P4</h3>
+        <p id="p4-body"></p>
+        <p class="path" id="p4-path"></p>
+      </article>
+    </div>
+  </section>
+
+  <footer>
+    <p>TTFT: time until the first generated text appears. Runtime waiting: requests queued inside vLLM. Deferred: jobs held by ServeScope. Background cap: max admitted background jobs currently allowed.</p>
+  </footer>
+  <script src="/app.js"></script>
+</body>
+</html>
