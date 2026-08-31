@@ -1,0 +1,107 @@
+ServeScope P0 environment capture
+captured_at_utc: 2026-08-31T00:14:02Z
+note: timings in artifacts/p0/smoke.json are smoke-test environment evidence, not benchmark results.
+
+=== Windows ===
+os_caption: Microsoft Windows 11 Home
+os_version: 10.0.26200
+os_build: 10.0.26200.9168
+wsl_version: 2.7.12.0
+wsl_kernel_package: 6.18.33.2-2
+wslg_version: 1.0.73.2
+default_distro: Ubuntu
+default_wsl_version: 2
+installed_distros:
+  Ubuntu            Stopped/Running   2
+  docker-desktop    Stopped           2
+selected_distro_is_wsl2: yes
+
+=== WSL / Linux ===
+uname: Linux MayurGPC 6.18.33.2-microsoft-standard-WSL2 #1 SMP PREEMPT_DYNAMIC Thu Jun 18 21:54:43 UTC 2026 x86_64 x86_64 x86_64 GNU/Linux
+os_release: Ubuntu 24.04.2 LTS (noble)
+cpu: Intel(R) Core(TM) i9-14900KF
+wsl_ram_total: 15Gi (MemTotal 16258760 kB)
+wsl_ram_available_at_inspect: 14Gi (MemAvailable 15472212 kB)
+wsl_swap: 4.0Gi
+wsl_root_disk: /dev/sdd 1007G total, 2.8G used at inspect, 953G avail
+windows_c_disk_via_wsl: /mnt/c 1.9T total, 410G avail
+
+=== GPU / driver ===
+gpu: NVIDIA GeForce RTX 4080 SUPER
+vram_total: 16376 MiB (17170956288 bytes via torch)
+nvidia_smi_windows: 610.88  KMD 610.88  CUDA UMD 13.3
+nvidia_smi_wsl: 610.57.01  KMD 610.88  CUDA UMD 13.3
+driver_version_query: 610.88
+nvidia_smi_cuda_compatibility: 13.3
+note: nvidia-smi CUDA UMD 13.3 is driver compatibility, not the PyTorch build CUDA.
+
+nvidia_smi_before_model_start:
+  memory.used: 1186 MiB
+  memory.free: 14860 MiB
+  processes: WSLg /Xwayland only (display compositor share)
+
+nvidia_smi_after_model_load:
+  memory.used: 15744 MiB
+  memory.free: 302 MiB
+  utilization.gpu: 21 %
+  processes: /Xwayland + /python3.12 (vLLM EngineCore)
+
+vllm_after_load_log:
+  Model loading took 3.22 GiB memory
+  Free memory on device (14.68/15.99 GiB) on startup
+  Desired GPU memory utilization is (0.85, 13.59 GiB)
+  Actual usage is 3.52 GiB for consumed memory (weights + non-torch)
+  Current kv cache memory in use is 9.97 GiB
+  attention backend: FLASH_ATTN version 2
+  device_config: cuda
+
+=== Python / packages ===
+uv: 0.12.7 (x86_64-unknown-linux-gnu)
+venv: /home/mayur/serve-scope/.venv
+python: 3.12.14 (uv managed CPython)
+system_python: 3.12.3
+vllm: 0.28.0
+torch: 2.13.0+cu130
+torch.version.cuda: 13.0
+torch.cuda.is_available: True
+torch_gpu: NVIDIA GeForce RTX 4080 SUPER
+note: first `uv pip install vllm --torch-backend=auto` resolved torch==2.13.0+cpu because nvidia-smi was not on PATH. Reinstalled with --torch-backend=cu130.
+
+=== Model / server ===
+model: Qwen/Qwen3-1.7B
+dtype: torch.bfloat16
+quantization: None
+max_seq_len: 40960 (model default; not tuned)
+served_model_name: Qwen/Qwen3-1.7B
+hf_home: /home/mayur/.cache/huggingface
+repo_path: /home/mayur/serve-scope
+
+exact_server_command:
+  VLLM_WSL2_ENABLE_PIN_MEMORY=1
+  VLLM_USE_FLASHINFER_SAMPLER=0
+  HF_HOME=/home/mayur/.cache/huggingface
+  PATH includes /home/mayur/.local/gcc/usr/bin and /usr/lib/wsl/lib
+  LD_LIBRARY_PATH=/home/mayur/.local/gcc/usr/lib/x86_64-linux-gnu:/usr/lib/wsl/lib
+  CC=/home/mayur/.local/gcc/usr/bin/gcc
+  /home/mayur/serve-scope/.venv/bin/vllm serve Qwen/Qwen3-1.7B --gpu-memory-utilization 0.85 --enforce-eager
+
+necessary_args_and_why:
+  --gpu-memory-utilization 0.85
+    default 0.92 needed 14.71 GiB free; Windows/WSLg already held ~1.2 GiB VRAM
+  --enforce-eager
+    default inductor compile and FlashInfer JIT asked for nvcc; CUDA Toolkit was not installed
+  VLLM_WSL2_ENABLE_PIN_MEMORY=1
+    vLLM 0.28 V2 runner requires UVA/pinned memory; WSL default disables it
+  VLLM_USE_FLASHINFER_SAMPLER=0
+    FlashInfer sampler JIT requires nvcc; native/PyTorch sampler used instead
+  user-local gcc 13.3.0 at /home/mayur/.local/gcc
+    Triton still needs a host C compiler; sudo apt was not available so gcc was extracted from Ubuntu debs into $HOME
+
+=== Smoke request ===
+endpoint: POST http://127.0.0.1:8000/v1/chat/completions
+streaming: true
+success: true
+streamed_chunk_count: 31
+ttft_seconds: 0.20753784300040934
+e2e_seconds: 0.5761586290000196
+see: artifacts/p0/smoke.json

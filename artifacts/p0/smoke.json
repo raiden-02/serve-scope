@@ -1,0 +1,15 @@
+{
+  "model": "Qwen/Qwen3-1.7B",
+  "backend": "vllm",
+  "backend_version": "0.28.0",
+  "streaming": true,
+  "success": true,
+  "ttft_seconds": 0.20753784300040934,
+  "e2e_seconds": 0.5761586290000196,
+  "request_send_seconds": 4.206300036457833e-05,
+  "first_streamed_content_seconds": 0.20753784300040934,
+  "completion_seconds": 0.5761586290000196,
+  "streamed_chunk_count": 31,
+  "streamed_text": "<think>\nOkay, the user wants me to reply with exactly the sentence \"P0 smoke ok.\" Let me make sure I understand the context. The user mentioned",
+  "error": null
+}
