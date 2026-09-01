@@ -6,7 +6,7 @@ ServeScope keeps interactive LLM requests responsive when background jobs share 
 
 It is a local measurement lab on an RTX 4080 SUPER. It is not a production serving product and not a new inference runtime.
 
-## Why I built it
+## Why this exists
 
 One GPU can serve a person waiting on a reply and longer background jobs at the same time. If the background jobs flood the server, the person stares at a blank reply for seconds.
 
