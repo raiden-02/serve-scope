@@ -229,7 +229,7 @@ vllm serve Qwen/Qwen3-1.7B --gpu-memory-utilization 0.85 --enforce-eager --enabl
 
 `--enable-per-request-metrics` lets streaming usage chunks carry vLLM queue/TTFT timings.
 
-Priority server, same flags plus `--scheduling-policy priority`. Launchers: `scripts/_p3_start_fcfs.sh` and `scripts/_p3_start_priority.sh`.
+Priority server, same flags plus `--scheduling-policy priority`. The live demo starts that server with `scripts/start_server.sh`. Historical benchmark launchers remain at `scripts/_p3_start_fcfs.sh` and `scripts/_p3_start_priority.sh`.
 
 ### Harness
 

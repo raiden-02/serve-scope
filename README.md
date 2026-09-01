@@ -39,18 +39,35 @@ An earlier interactive-only sweep did not find a clean saturation cliff. At 128 
 
 Expected setup: Windows + WSL2 Ubuntu, Python 3.12, an NVIDIA GPU with enough VRAM for `Qwen/Qwen3-1.7B` BF16, vLLM 0.28.0.
 
+vLLM/Triton needs a host C compiler; a normal system `gcc` is fine. The original experiment used a user-local GCC only because `sudo apt` was unavailable.
+
+### First-time setup
+
+Install [uv](https://docs.astral.sh/uv/) if you do not have it.
+
+```bash
+cd ~/serve-scope
+uv venv --python 3.12 --seed
+source .venv/bin/activate
+uv pip install -e ".[dev]" --torch-backend=cu130
+```
+
+`--torch-backend=cu130` is required here. `auto` resolved CPU PyTorch on the original machine.
+
+### Start the lab
+
 ```bash
 cd ~/serve-scope
 source .venv/bin/activate
 ```
 
-Terminal 1 starts the priority server:
+Terminal 1:
 
 ```bash
-scripts/_p3_start_priority.sh
+scripts/start_server.sh
 ```
 
-Terminal 2 starts the lab:
+Terminal 2:
 
 ```bash
 python scripts/run_demo.py

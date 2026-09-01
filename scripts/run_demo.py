@@ -19,7 +19,7 @@ def main() -> None:
     host = CONFIG.get("demo_host", "127.0.0.1")
     port = int(CONFIG.get("demo_port", 8080))
     print(f"ServeScope demo: http://{host}:{port}", flush=True)
-    print("Start vLLM separately with scripts/_p3_start_priority.sh", flush=True)
+    print("Start vLLM separately with scripts/start_server.sh", flush=True)
     from servescope.demo.app import app
 
     uvicorn.run(app, host=host, port=port, reload=False)
