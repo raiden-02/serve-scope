@@ -8,11 +8,13 @@ It is a local measurement lab on an RTX 4080 SUPER. It is not a production servi
 
 ## Recorded live run
 
-This is a real local run of ServeScope on the RTX 4080 SUPER used for the project experiments. The browser first runs the workload with native vLLM priority, then repeats the same workload with ServeScope admission so the queue placement and interactive-latency behavior can be watched live.
+This is a real local run of ServeScope on the RTX 4080 SUPER used for the project experiments. Native vLLM priority runs first, followed by the same workload with ServeScope admission, so you can watch where background work queues and how interactive first-token latency changes.
 
-The numbers from this single run can vary. The repeated recorded benchmark results later in this README remain the measured project result.
+The numbers from this single run can vary. The repeated benchmark results below remain the measured project result.
 
-[▶ Watch the recorded ServeScope live run](docs/servescope-live-demo.mp4)
+[![ServeScope — Keeping LLM Chat Responsive Under GPU Load](https://img.youtube.com/vi/2dLA71nH2Pw/maxresdefault.jpg)](https://youtu.be/2dLA71nH2Pw)
+
+**[▶ Watch: ServeScope — Keeping LLM Chat Responsive Under GPU Load](https://youtu.be/2dLA71nH2Pw)**
 
 ## Why this exists
 
