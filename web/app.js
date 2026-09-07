@@ -1,12 +1,5 @@
 const $ = (id) => document.getElementById(id);
 
-const BURST_LABEL = {
-  idle: "Ready",
-  injecting: "Adding jobs",
-  draining: "Finishing background work",
-  complete: "Finished",
-};
-
 function fmt(value, suffix = "") {
   if (value === null || value === undefined || value === "") return "Unavailable";
   return `${value}${suffix}`;
@@ -27,22 +20,41 @@ function shortModel(name) {
   return String(name).split("/").pop();
 }
 
-function drawChart(history) {
-  const canvas = $("chart");
+function formatSeconds(value) {
+  if (value === null || value === undefined) return "-";
+  const seconds = Number(value);
+  if (Number.isNaN(seconds)) return "-";
+  if (seconds >= 1) return `${seconds.toFixed(2)} s`;
+  return `${Math.round(seconds * 1000)} ms`;
+}
+
+function formatCount(value) {
+  if (value === null || value === undefined) return "-";
+  return String(value);
+}
+
+function drawChart(canvasId, history, yMax) {
+  const canvas = $(canvasId);
+  if (!canvas) return;
   const ctx = canvas.getContext("2d");
   const w = canvas.width;
   const h = canvas.height;
   ctx.clearRect(0, 0, w, h);
   if (!history.length) return;
-  const maxY = Math.max(1, ...history.map((p) => Math.max(p.vllm_waiting || 0, p.servescope_pending || 0)));
-  const t0 = history[0].t_s;
-  const t1 = history[history.length - 1].t_s;
+  const maxY = Math.max(
+    1,
+    yMax || 0,
+    ...history.map((p) => Math.max(p.vllm_waiting || 0, p.servescope_pending || 0)),
+  );
+  const t0 = history[0].t_s || 0;
+  const t1 = history[history.length - 1].t_s || t0;
   const span = Math.max(0.001, t1 - t0);
   const series = [
     { key: "vllm_waiting", color: "#e08b6b" },
     { key: "servescope_pending", color: "#d7b06a" },
   ];
   series.forEach((s) => {
+    if (!history.some((p) => (p[s.key] || 0) > 0) && s.key === "servescope_pending") return;
     ctx.beginPath();
     ctx.strokeStyle = s.color;
     ctx.lineWidth = 1.5;
@@ -93,7 +105,7 @@ function renderP4(block) {
   setText("p4-tradeoff", `Background jobs finished later: ${from} → ${to} p95`);
   setText("p4-path", block.path || "");
   if (block.jobs_completed != null) {
-    setText("p4-jobs", `All ${block.jobs_completed} jobs still completed.`);
+    setText("p4-jobs", `All ${block.jobs_completed} jobs completed.`);
   }
 }
 
@@ -108,20 +120,114 @@ function renderP3(block) {
   setText("p3-path", block.path || "");
 }
 
+function applySide(prefix, side, sharedY) {
+  if (!side) return;
+  const m = side.metrics || {};
+  setText(`${prefix}-status`, side.status_label || side.state || "-");
+  setText(`${prefix}-phase`, side.phase || "-");
+  const elapsed = side.elapsed_s || 0;
+  const pct = Math.min(100, (elapsed / 60) * 100);
+  const bar = $(`${prefix === "native" ? "native" : "ss"}-timeline`);
+  if (bar) bar.style.width = `${pct}%`;
+  const p95 = formatSeconds(m.burst_p95_ttft_s);
+  setText(`${prefix}-p95`, p95);
+  setText(
+    `${prefix}-p95-note`,
+    side.final ? "First-token p95" : `p95 so far · ${m.burst_p95_sample_count || 0} burst samples`,
+  );
+  setText(`${prefix}-wait`, formatCount(m.vllm_waiting));
+  setText(`${prefix}-wait-max`, formatCount(m.max_vllm_waiting));
+  setText(`${prefix}-ix-offered`, formatCount(m.interactive_target != null ? m.interactive_target : m.interactive_offered));
+  setText(`${prefix}-ix-done`, formatCount(m.interactive_completed));
+  setText(`${prefix}-ix-fail`, formatCount(m.interactive_failed));
+  setText(`${prefix}-bg-offered`, formatCount(m.background_target != null ? m.background_target : m.background_offered));
+  setText(`${prefix}-bg-admitted`, formatCount(m.background_admitted));
+  setText(`${prefix}-bg-done`, formatCount(m.background_completed));
+  setText(`${prefix}-bg-fail`, formatCount(m.background_failed));
+  if (prefix === "ss") {
+    setText("ss-pending", formatCount(m.local_pending));
+    setText("ss-pending-max", formatCount(m.peak_local_pending));
+  }
+  if (side.final && m.background_e2e_p95_s != null) {
+    const extra = m.background_output_goodput_tps != null
+      ? ` · ${Math.round(m.background_output_goodput_tps)} tok/s`
+      : "";
+    setText(`${prefix}-tradeoff`, `Background p95 total E2E ${formatSeconds(m.background_e2e_p95_s)}${extra}`);
+  }
+  drawChart(prefix === "native" ? "native-chart" : "ss-chart", side.history || [], sharedY);
+}
+
+function applyComparison(cmp) {
+  if (!cmp) return;
+  setText("comparison-state", cmp.overall_state || "idle");
+  const wl = cmp.workload || {};
+  if (wl.interactive) {
+    setText(
+      "workload-line",
+      `Live workload: ${wl.interactive.offered_rps} interactive requests/s for ${wl.scenario_duration_s} seconds, with ${wl.background.offered_rps} background requests/s during the ${wl.pre_burst_end_s}–${wl.burst_end_s} second burst.`,
+    );
+  }
+  const nativeHist = (cmp.native && cmp.native.history) || [];
+  const ssHist = (cmp.servescope && cmp.servescope.history) || [];
+  const sharedY = Math.max(
+    1,
+    ...nativeHist.map((p) => p.vllm_waiting || 0),
+    ...ssHist.map((p) => Math.max(p.vllm_waiting || 0, p.servescope_pending || 0)),
+  );
+  applySide("native", cmp.native, sharedY);
+  applySide("ss", cmp.servescope, sharedY);
+
+  const done = ["complete", "invalid", "failed", "cancelled"].includes(cmp.overall_state);
+  $("live-result").hidden = !done;
+  if (!done) return;
+
+  const native = (cmp.native && (cmp.native.final || cmp.native.metrics)) || {};
+  const gated = (cmp.servescope && (cmp.servescope.final || cmp.servescope.metrics)) || {};
+  setText("live-native-p95", formatSeconds(native.burst_p95_ttft_s));
+  setText("live-ss-p95", formatSeconds(gated.burst_p95_ttft_s));
+  setText("live-native-wait", formatCount(native.max_vllm_waiting));
+  setText("live-ss-wait", formatCount(gated.max_vllm_waiting));
+  setText("live-native-pending", "0");
+  setText("live-ss-pending", formatCount(gated.peak_local_pending));
+  setText("live-native-e2e", formatSeconds(native.background_e2e_p95_s));
+  setText("live-ss-e2e", formatSeconds(gated.background_e2e_p95_s));
+  setText(
+    "live-native-bg",
+    `${formatCount(native.background_completed)}/${formatCount(native.background_offered)}`,
+  );
+  setText(
+    "live-ss-bg",
+    `${formatCount(gated.background_completed)}/${formatCount(gated.background_offered)}`,
+  );
+  setText(
+    "live-native-fail",
+    String((native.interactive_failed || 0) + (native.background_failed || 0)),
+  );
+  setText(
+    "live-ss-fail",
+    String((gated.interactive_failed || 0) + (gated.background_failed || 0)),
+  );
+
+  const result = cmp.comparison || {};
+  if (result.available) {
+    setText("live-headline", result.headline || "");
+    $("live-headline").classList.remove("invalid");
+    setText("live-validity", "");
+  } else {
+    setText("live-headline", result.headline || "Live run was not valid for comparison.");
+    $("live-headline").classList.add("invalid");
+    setText("live-validity", result.reason ? `Reason: ${result.reason}` : "");
+  }
+}
+
 function applyLive(data) {
   const connected = data.server === "connected";
   document.body.classList.toggle("server-live", connected);
   document.body.classList.toggle("server-offline", !connected);
-  document.body.classList.toggle("mode-native", data.mode === "native");
-  document.body.classList.toggle("mode-backpressure", data.mode === "backpressure");
-  document.body.classList.remove("burst-idle", "burst-injecting", "burst-draining", "burst-complete");
-  document.body.classList.add(`burst-${data.burst_state || "idle"}`);
-
   $("offline-banner").hidden = connected;
   setText("live-status", connected ? "Live" : "Offline");
   setText("live-gpu", connected ? shortGpu(data.gpu_name) : "GPU unavailable");
   setText("live-model", connected ? shortModel(data.model) : "Model unavailable");
-
   setText("model", fmt(data.model));
   setText("gpu-name", fmt(data.gpu_name));
   setText("gpu-util", data.gpu_util_pct == null ? "Unavailable" : `${data.gpu_util_pct}%`);
@@ -130,59 +236,15 @@ function applyLive(data) {
   } else {
     setText("vram", `${Math.round(data.vram_used_mib)} / ${Math.round(data.vram_total_mib)} MiB`);
   }
-  const waiting = data.vllm_waiting;
-  const pending = data.mode === "backpressure" ? data.background_pending : 0;
   setText("vllm-running", data.vllm_running == null ? "Unavailable" : String(data.vllm_running));
-  setText("vllm-waiting", waiting == null ? "Unavailable" : String(waiting));
-  setText("burst-state", BURST_LABEL[data.burst_state] || data.burst_state);
-  setText("bg-offered", data.background_offered);
-  setText("bg-admitted", data.background_admitted);
-  setText("bg-running", data.background_running);
-  setText("bg-completed", data.background_completed);
-  setText("bg-failed", data.background_failed);
-  setText("queue-runtime", waiting == null ? "Unavailable" : String(waiting));
-  setText("queue-local", String(pending));
-  setText("flow-held", String(pending));
-  setText("flow-ss-wait", waiting == null ? "Unavailable" : String(waiting));
-  setText(
-    "flow-native-wait",
-    waiting == null ? "Unavailable waiting inside server" : `${waiting} waiting inside server`,
-  );
+  setText("vllm-waiting", data.vllm_waiting == null ? "Unavailable" : String(data.vllm_waiting));
 
-  const target = data.burst_target || (data.burst_preset && data.burst_preset.jobs) || 0;
-  const finished = (data.background_completed || 0) + (data.background_failed || 0);
-  const denom = Math.max(target, data.background_offered || 0, 1);
-  $("progress-fill").style.width = `${Math.min(100, (finished / denom) * 100)}%`;
-  setText("progress-label", `${finished} / ${target || data.background_offered || 0} finished`);
-
-  if (data.mode === "backpressure") {
-    setText(
-      "admission-line",
-      `Background jobs allowed in: ${data.controller_limit} (concurrency limit) · last action: ${data.controller_action}`,
-    );
-    setText("hood-cap", String(data.controller_limit));
-    setText("hood-action", data.controller_action);
-    setText("flow-caption", "ServeScope can hold extra background jobs before they reach the model server.");
-  } else {
-    setText("admission-line", "Native vLLM sends background jobs immediately. Nothing is held by ServeScope.");
-    setText("hood-cap", "n/a in native mode");
-    setText("hood-action", "n/a in native mode");
-    setText("flow-caption", "Native vLLM sends background jobs straight to the model server.");
-  }
-
-  if (data.burst_preset) {
-    const p = data.burst_preset;
-    $("burst-hint").textContent =
-      `${p.rps} jobs/s for ${p.duration_s} seconds · ${p.jobs} real model requests. Shorter than the recorded 60-second mixed workload.`;
-  }
-
-  $("mode-native").classList.toggle("active", data.mode === "native");
-  $("mode-backpressure").classList.toggle("active", data.mode === "backpressure");
-  $("burst").disabled = !data.burst_allowed || !connected;
-  $("send").disabled = !connected;
-  $("mode-native").disabled = !data.mode_switch_allowed;
-  $("mode-backpressure").disabled = !data.mode_switch_allowed;
-  drawChart(data.history || []);
+  const cmp = data.comparison;
+  applyComparison(cmp);
+  const running = cmp && cmp.overall_state === "running";
+  $("run-comparison").disabled = !connected || running;
+  $("send").disabled = !connected || Boolean(data.chat_locked);
+  $("chat-lock").hidden = !data.chat_locked;
 }
 
 async function poll() {
@@ -194,31 +256,18 @@ async function poll() {
     document.body.classList.remove("server-live");
     $("offline-banner").hidden = false;
     setText("live-status", "Offline");
-    $("burst").disabled = true;
+    $("run-comparison").disabled = true;
     $("send").disabled = true;
   }
 }
 
-async function setMode(mode) {
-  const res = await fetch("/api/mode", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ mode }),
-  });
+async function startComparison() {
+  const res = await fetch("/api/comparison/start", { method: "POST" });
   if (!res.ok) {
     $("chat-status").textContent = await res.text();
     return;
   }
-  applyLive(await res.json());
-}
-
-async function startBurst() {
-  const res = await fetch("/api/burst", { method: "POST" });
-  if (!res.ok) {
-    $("chat-status").textContent = await res.text();
-    return;
-  }
-  applyLive(await res.json());
+  applyComparison(await res.json());
 }
 
 async function sendChat(event) {
@@ -259,6 +308,9 @@ async function sendChat(event) {
           $("ttft-value").textContent = `${Math.round(performance.now() - t0)} ms`;
         }
         $("reply").textContent += msg.text;
+      } else if (msg.type === "first" && msg.backend_ttft_ms != null && !first) {
+        first = true;
+        $("ttft-value").textContent = `${Math.round(msg.backend_ttft_ms)} ms`;
       } else if (msg.type === "error") {
         $("chat-status").textContent = msg.message;
       }
@@ -268,9 +320,7 @@ async function sendChat(event) {
 
 $("chat-form").addEventListener("submit", sendChat);
 $("send").addEventListener("click", sendChat);
-$("burst").addEventListener("click", startBurst);
-$("mode-native").addEventListener("click", () => setMode("native"));
-$("mode-backpressure").addEventListener("click", () => setMode("backpressure"));
+$("run-comparison").addEventListener("click", startComparison);
 loadEvidence();
 poll();
 setInterval(poll, 500);

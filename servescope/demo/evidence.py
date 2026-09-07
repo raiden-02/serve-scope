@@ -11,8 +11,10 @@ P4_COMPARISON = Path("artifacts/p4/comparison-2026-08-31T21-15-28Z/result.json")
 P4_NATIVE_SUITE = Path("artifacts/p4/native-2026-08-31T21-07-52Z/result.json")
 P4_BACKPRESSURE_SUITE = Path("artifacts/p4/backpressure-2026-08-31T21-11-34Z/result.json")
 SESSION_NOTE = (
-    "These were separate benchmark sessions, so they should not be read as "
-    "one four-stage latency progression."
+    "Native and ServeScope were measured in the same benchmark session. "
+    "The FCFS vs native-priority experiment below was measured in a different "
+    "benchmark session, so FCFS → priority → ServeScope should not be read as "
+    "one continuous latency progression."
 )
 
 

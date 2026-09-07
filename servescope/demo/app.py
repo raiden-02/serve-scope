@@ -15,9 +15,11 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
+from starlette.types import Receive, Scope, Send
 
 from servescope.backpressure import AimdController
 from servescope.client import build_chat_payload
+from servescope.demo.comparison import ComparisonBlocked, ComparisonBusy, LiveComparison
 from servescope.demo.evidence import load_evidence
 from servescope.demo.state import (
     ACTIVE_BURST,
@@ -39,6 +41,19 @@ from servescope.metrics import (
 from servescope.workload import select_background_prompt
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+class HttpOnlyStaticFiles(StaticFiles):
+    """StaticFiles asserts scope type http. Browser/IDE previews send websocket upgrades to /."""
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            if scope["type"] == "websocket":
+                message = await receive()
+                if message["type"] == "websocket.connect":
+                    await send({"type": "websocket.close", "code": 1000})
+            return
+        await super().__call__(scope, receive, send)
 WEB = ROOT / "web"
 CONFIG_PATH = ROOT / "configs" / "demo.json"
 
@@ -88,6 +103,7 @@ class DemoApp:
         self.started_at = time.monotonic()
         self.burst_task: asyncio.Task | None = None
         self._burst_jobs: set[asyncio.Task] = set()
+        self.comparison = LiveComparison(root=ROOT, probe=self.probe_vllm)
 
     def _new_controller(self) -> AimdController:
         ctl = self.config["controller"]
@@ -128,7 +144,7 @@ class DemoApp:
         try:
             response = await self.client.get(self.config["base_url"].rstrip("/") + "/health", timeout=2.0)
             return response.status_code == 200
-        except httpx.HTTPError:
+        except (httpx.HTTPError, RuntimeError):
             return False
 
     async def refresh_runtime(self) -> None:
@@ -172,6 +188,8 @@ class DemoApp:
             **self.runtime,
             "burst_preset": burst,
             "history": list(self.state.history),
+            "comparison": self.comparison.snapshot(),
+            "chat_locked": self.comparison.chat_locked,
         }
 
     async def stream_completion(self, prompt: str, *, priority: int, min_tokens: int, max_tokens: int):
@@ -306,6 +324,8 @@ class DemoApp:
     async def close(self) -> None:
         if self.burst_task is not None and not self.burst_task.done():
             self.burst_task.cancel()
+        if self.comparison.is_active():
+            await self.comparison.cancel()
         await self._cancel_burst_jobs()
         await self.client.aclose()
 
@@ -338,8 +358,25 @@ def create_app(config: dict[str, Any] | None = None) -> FastAPI:
     async def evidence() -> dict[str, Any]:
         return load_evidence(ROOT)
 
+    @app.get("/api/comparison")
+    async def comparison() -> dict[str, Any]:
+        return demo.comparison.snapshot()
+
+    @app.post("/api/comparison/start")
+    async def comparison_start() -> dict[str, Any]:
+        if demo.state.burst_state in ACTIVE_BURST:
+            raise HTTPException(status_code=409, detail="a toy burst is still running")
+        try:
+            return demo.comparison.start(connected=demo.runtime.get("server") == "connected")
+        except ComparisonBusy as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except ComparisonBlocked as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
     @app.post("/api/mode")
     async def set_mode(body: ModeIn) -> dict[str, Any]:
+        if demo.comparison.is_active():
+            raise HTTPException(status_code=409, detail="live comparison is running")
         async with demo.lock:
             try:
                 demo.state.set_mode(body.mode)
@@ -351,6 +388,8 @@ def create_app(config: dict[str, Any] | None = None) -> FastAPI:
 
     @app.post("/api/burst")
     async def burst() -> dict[str, Any]:
+        if demo.comparison.is_active():
+            raise HTTPException(status_code=409, detail="live comparison is running")
         async with demo.lock:
             try:
                 demo.state.start_burst(demo.burst_jobs)
@@ -361,6 +400,11 @@ def create_app(config: dict[str, Any] | None = None) -> FastAPI:
 
     @app.post("/api/chat")
     async def chat(body: ChatIn) -> StreamingResponse:
+        if demo.comparison.chat_locked:
+            raise HTTPException(
+                status_code=409,
+                detail="Interactive benchmark traffic is running automatically.",
+            )
         if demo.runtime.get("server") != "connected":
             raise HTTPException(status_code=503, detail="vLLM is disconnected")
 
@@ -381,7 +425,7 @@ def create_app(config: dict[str, Any] | None = None) -> FastAPI:
 
         return StreamingResponse(events(), media_type="text/event-stream")
 
-    app.mount("/", StaticFiles(directory=str(WEB), html=True), name="web")
+    app.mount("/", HttpOnlyStaticFiles(directory=str(WEB), html=True), name="web")
     app.state.demo = demo
     return app
 

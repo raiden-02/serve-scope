@@ -75,15 +75,14 @@ python scripts/run_demo.py
 
 Open `http://127.0.0.1:8080`. If vLLM is down, the page still renders and the recorded results stay visible. Live telemetry is marked unavailable rather than filled with zeros.
 
-Live modes use the same already-running priority server:
+The browser can run one paired live comparison on the local GPU. Click **Run live comparison**. Native vLLM priority runs first, then the same workload with ServeScope admission. The recorded benchmark below contains the repeated measurements used for the project result.
 
-- **Native vLLM:** background jobs go straight to the server at priority 1
-- **ServeScope:** the same server, but background jobs wait in a local queue first
+Both live sides use the already-running priority server. Interactive requests stay at priority 0. Background requests stay at priority 1. The only difference is whether background jobs go straight to vLLM or wait in the ServeScope queue first.
 
-The browser cannot change `--scheduling-policy`. Default FCFS is recorded evidence only. The on-page burst is `8 jobs/s × 5 s = 40` real requests, not a replay of the 60-second benchmark.
+The browser cannot change `--scheduling-policy`. Default FCFS is recorded evidence only.
 
 ```bash
-python -m pytest tests/test_p1_metrics.py tests/test_p2_metrics.py tests/test_p3_metrics.py tests/test_p4_backpressure.py tests/test_demo_state.py tests/test_demo_evidence.py tests/test_demo_app.py tests/test_demo_orchestration.py -q
+python -m pytest tests/test_p1_metrics.py tests/test_p2_metrics.py tests/test_p3_metrics.py tests/test_p4_backpressure.py tests/test_demo_state.py tests/test_demo_evidence.py tests/test_demo_app.py tests/test_demo_orchestration.py tests/test_demo_comparison.py -q
 ```
 
 ## How it works
