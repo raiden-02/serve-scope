@@ -6,6 +6,14 @@ ServeScope keeps interactive LLM requests responsive when background jobs share 
 
 It is a local measurement lab on an RTX 4080 SUPER. It is not a production serving product and not a new inference runtime.
 
+## Recorded live run
+
+This is a real local run of ServeScope on the RTX 4080 SUPER used for the project experiments. The browser first runs the workload with native vLLM priority, then repeats the same workload with ServeScope admission so the queue placement and interactive-latency behavior can be watched live.
+
+The numbers from this single run can vary. The repeated recorded benchmark results later in this README remain the measured project result.
+
+[▶ Watch the recorded ServeScope live run](docs/servescope-live-demo.mp4)
+
 ## Why this exists
 
 One GPU can serve a person waiting on a reply and longer background jobs at the same time. If the background jobs flood the server, the person stares at a blank reply for seconds.
